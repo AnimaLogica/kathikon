@@ -4,6 +4,8 @@ defmodule Kathikon.ClaimTest do
   alias Kathikon.{Job, Storage}
 
   setup do
+    :ok = Kathikon.pause_queue(:default)
+    on_exit(fn -> Kathikon.resume_queue(:default) end)
     Storage.setup()
     Storage.clear_jobs!()
     :ok
