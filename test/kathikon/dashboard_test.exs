@@ -532,6 +532,11 @@ defmodule Kathikon.Dashboard.PurgeMockTest do
 
   test "pause_all falls back to configured queues when list_jobs fails" do
     stub(@mock, :list_jobs, fn _ -> {:error, :boom} end)
+
+    on_exit(fn ->
+      for queue <- Kathikon.Config.queue_names(), do: Kathikon.resume_queue(queue)
+    end)
+
     assert :ok = Dashboard.pause_all()
   end
 

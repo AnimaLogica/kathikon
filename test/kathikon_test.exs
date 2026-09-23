@@ -78,7 +78,9 @@ defmodule Kathikon.IntegrationTest do
   @queue :integration
 
   setup do
+    TestSupport.ensure_runtime!()
     TestSupport.resume_all_queues!()
+    TestSupport.stop_dispatcher(@queue)
     TestSupport.reset!()
     :ok = Kathikon.start_queue(@queue)
     :ok
