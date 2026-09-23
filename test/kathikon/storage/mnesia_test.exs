@@ -239,6 +239,17 @@ defmodule Kathikon.Storage.MnesiaTest do
 
       assert Mnesia.promote_scheduled(now) == 2
     end
+
+    test "promote_scheduled returns 0 when mnesia is stopped" do
+      on_exit(fn ->
+        {:ok, _} = Application.ensure_all_started(:mnesia)
+        Kathikon.TestSupport.ensure_runtime!()
+        Storage.setup()
+      end)
+
+      :ok = Application.stop(:mnesia)
+      assert Mnesia.promote_scheduled(DateTime.utc_now()) == 0
+    end
   end
 
   describe "mnesia context mock" do

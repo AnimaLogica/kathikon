@@ -1229,5 +1229,11 @@ defmodule Kathikon.Storage.Mnesia do
     end
   end
 
-  defp table_exists?(table), do: table in :mnesia.system_info(:tables)
+  defp table_exists?(table) do
+    try do
+      :mnesia.system_info(:is_running) == :yes and table in :mnesia.system_info(:tables)
+    catch
+      :exit, _ -> false
+    end
+  end
 end
