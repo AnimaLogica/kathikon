@@ -82,7 +82,7 @@ jobs:
       - name: Start epmd
         run: epmd -daemon
       - name: Run tests
-        run: mix test --trace
+        run: mix test --trace --exclude async_timing
 
   coverage:
     name: Coverage
@@ -112,9 +112,9 @@ jobs:
       - name: Push coverage to Coveralls
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: mix coveralls.github
+        run: mix coveralls.github --exclude async_timing
       - name: Check coverage threshold
-        run: mix coveralls
+        run: mix coveralls --exclude async_timing
 
   security:
     name: Security

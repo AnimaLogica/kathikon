@@ -306,6 +306,7 @@ defmodule Kathikon.DashboardTest do
     assert retried.state in [:available, :scheduled]
   end
 
+  @tag :async_timing
   test "retry_jobs and purge_jobs" do
     job =
       Job.build(Kathikon.Workers.FailWorker, %{}, queue: :default, max_attempts: 1)

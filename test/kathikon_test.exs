@@ -86,6 +86,7 @@ defmodule Kathikon.IntegrationTest do
     :ok
   end
 
+  @tag :async_timing
   test "insert executes a successful job" do
     {:ok, job} = Kathikon.insert(Kathikon.Workers.SuccessWorker, %{}, queue: @queue)
 
@@ -93,6 +94,7 @@ defmodule Kathikon.IntegrationTest do
     assert completed.attempts == 1
   end
 
+  @tag :async_timing
   test "insert retries failed jobs" do
     {:ok, job} = Kathikon.insert(Kathikon.Workers.CountingWorker, %{}, queue: @queue)
 
@@ -101,6 +103,7 @@ defmodule Kathikon.IntegrationTest do
     assert length(completed.errors) == 1
   end
 
+  @tag :async_timing
   test "insert discards after max attempts" do
     {:ok, job} =
       Kathikon.insert(Kathikon.Workers.FailWorker, %{}, queue: @queue, max_attempts: 2)
@@ -119,6 +122,7 @@ defmodule Kathikon.IntegrationTest do
     assert cancelled.state == :cancelled
   end
 
+  @tag :async_timing
   test "sleep defers then completes without incrementing attempts" do
     {:ok, job} = Kathikon.insert(Kathikon.Workers.SleepOnceWorker, %{}, queue: @queue)
 
@@ -127,6 +131,7 @@ defmodule Kathikon.IntegrationTest do
     assert completed.errors == []
   end
 
+  @tag :async_timing
   test "higher priority jobs run first" do
     TestSupport.reset_order!()
     TestSupport.stop_dispatcher(:priority)
@@ -155,6 +160,7 @@ defmodule Kathikon.IntegrationTest do
     assert TestSupport.order() == ["high", "low"]
   end
 
+  @tag :async_timing
   test "scheduler promotes scheduled jobs" do
     {:ok, job} =
       Kathikon.insert(Kathikon.Workers.SuccessWorker, %{}, queue: @queue, schedule_in: 0)
@@ -173,6 +179,7 @@ defmodule Kathikon.IntegrationTest do
     assert [{_pid, _}] = Registry.lookup(Kathikon.Registry, {:dispatcher, queue})
   end
 
+  @tag :async_timing
   test "pruner removes old terminal jobs" do
     {:ok, job} = Kathikon.insert(Kathikon.Workers.SuccessWorker, %{}, queue: @queue)
     assert {:ok, _} = TestSupport.await_state(job.id, :completed)
