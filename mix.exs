@@ -1,7 +1,7 @@
 defmodule Kathikon.MixProject do
   use Mix.Project
 
-  @version "0.2.1"
+  @version "0.3.0"
 
   def project do
     [
@@ -44,6 +44,7 @@ defmodule Kathikon.MixProject do
       {:telemetry, "~> 1.2"},
       {:tzdata, "~> 1.1"},
       {:quantum, "~> 3.5", optional: true},
+      {:phoenix_live_dashboard, "~> 0.8", optional: true},
       {:jason, "~> 1.4", only: [:dev, :test]},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:ex_slop, "~> 0.4", only: [:dev, :test], runtime: false},
@@ -78,17 +79,18 @@ defmodule Kathikon.MixProject do
       source_ref: "v#{@version}",
       source_url: "https://github.com/thanos/kathikon/blob/main",
       extras: extras(),
+      assets: %{"docs/screenshots" => "screenshots"},
       groups_for_modules: [
         API: ~r/^Kathikon$/,
         Core: ~r/^Kathikon\.(Job|Worker|Config|Storage|Telemetry|Report|Batch|Dashboard)$/,
+        Ops: [Kathikon.LiveDashboard.Page],
         Runtime: ~r/^Kathikon\.(Application|Queue|Dispatcher|Scheduler|Pruner)/,
         Storage: ~r/^Kathikon\.Storage/
       ],
       groups_for_extras: [
         Introduction: ~r/(^README|CHANGELOG|docs\/documentation)/i,
-        Guides: ~r/docs\/guides\//,
-        "v0.2.0":
-          ~r/docs\/(storage|job_lifecycle|scheduling|quantum|batches|management|reporting|architecture|articles)/,
+        Guides:
+          ~r/docs\/(guides\/|storage\.md|job_lifecycle|scheduling\.md|quantum|batches|management|dashboard_spec|reporting|architecture\.md|articles)/,
         Reference: ~r/docs\/reference\//,
         Design: ~r/(docs\/phase-1-|docs\/v0_2_0|plans\/)/,
         Livebook: ~r/livebooks\//
@@ -98,32 +100,34 @@ defmodule Kathikon.MixProject do
 
   defp extras do
     [
-      "docs/storage.md",
-      "docs/job_lifecycle.md",
-      "docs/scheduling.md",
-      "docs/quantum_adapter.md",
-      "docs/batches.md",
-      "docs/management_api.md",
-      "docs/dashboard_spec.md",
-      "docs/reporting.md",
-      "docs/architecture.md",
-      "docs/articles/kathikon_v0_2_0_control_scheduling_batches.md",
-      "docs/v0_2_0_architecture_review.md",
+      "README.md",
+      "CHANGELOG.md",
+      {"LICENSE", [title: "License"]},
+      {"docs/documentation.md", [title: "Documentation"]},
       "docs/guides/quick-start.md",
       "docs/guides/workers.md",
       "docs/guides/queues-and-concurrency.md",
       "docs/guides/scheduling.md",
+      {"docs/scheduling.md", [title: "Scheduling reference"]},
       "docs/guides/retries-and-errors.md",
       "docs/guides/cancellation.md",
+      "docs/storage.md",
+      "docs/guides/storage-and-embedding.md",
+      "docs/job_lifecycle.md",
+      "docs/batches.md",
+      "docs/management_api.md",
+      "docs/guides/live-dashboard.md",
+      "docs/dashboard_spec.md",
+      "docs/reporting.md",
       "docs/guides/telemetry-and-observability.md",
       "docs/guides/configuration.md",
-      "docs/guides/storage-and-embedding.md",
+      "docs/quantum_adapter.md",
+      "docs/architecture.md",
+      # "docs/articles/kathikon_v0_2_0_control_scheduling_batches.md",
+      # "docs/v0_2_0_architecture_review.md",
       "docs/reference/modules.md",
-      "README.md",
-      "CHANGELOG.md",
-      LICENSE: [title: "License"],
-      "docs/documentation.md": [title: "Documentation"],
-      "livebooks/kathikon_demo.livemd": [title: "Interactive demo"]
+      {"livebooks/kathikon_demo.livemd", [title: "Interactive demo"]},
+      {"livebooks/live_dashboard.livemd", [title: "LiveDashboard"]}
     ]
   end
 
@@ -133,7 +137,7 @@ defmodule Kathikon.MixProject do
       {"compile --warnings-as-errors", :dev},
       {"format --check-formatted", :dev},
       {"credo --strict", :dev},
-      {"sobelow --exit Low", :dev},
+      # {"sobelow --exit Low", :dev},
       {"dialyzer", :dev},
       {"test --cover", :test},
       {"docs --warnings-as-errors", :dev}

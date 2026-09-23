@@ -1,6 +1,6 @@
 # Module reference
 
-Public API and runtime modules for Kathikon v0.2.1. For narrative guides see the [documentation index](../documentation.html) or [quick start](../guides/quick-start.html).
+Public API and runtime modules for Kathikon v0.3.0. For narrative guides see the [documentation index](../documentation.html) or [quick start](../guides/quick-start.html).
 
 ---
 
@@ -374,6 +374,18 @@ Operations facade for CLIs, LiveView, and RPC. See [Management API](../managemen
 ```
 
 CLI: `mix kathikon.ops summary`
+
+### Kathikon.LiveDashboard.Page
+
+Optional LiveDashboard tab. Compiled only when `phoenix_live_dashboard` is available. Pause, kill, and retry require `allow_destructive_actions: true`. See [LiveDashboard in a Phoenix app](../guides/live-dashboard.md).
+
+```elixir
+live_dashboard "/dashboard",
+  additional_pages: [kathikon: Kathikon.LiveDashboard.Page],
+  allow_destructive_actions: true
+```
+
+Demo: [LiveDashboard livebook](../../livebooks/live_dashboard.livemd) or `iex examples/live_dashboard_ops.exs`.
 
 ### Kathikon.Cron
 

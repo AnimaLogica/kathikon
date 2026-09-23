@@ -15,8 +15,9 @@ defmodule Kathikon do
 
   See the [README](readme.html) and `docs/` guides for v0.2.0+ features:
   atomic claiming, job history, dead-letter queue, scheduling, batches,
-  management APIs, reporting, and v0.2.1 operations tooling (`Kathikon.Dashboard`,
-  `mix kathikon.ops`).
+  management APIs, reporting, v0.2.1 operations tooling (`Kathikon.Dashboard`,
+  `mix kathikon.ops`), and the v0.3.0 LiveDashboard page
+  (`Kathikon.LiveDashboard.Page`).
   """
 
   alias Kathikon.{Job, Queue, QueueControl, Storage, Telemetry}

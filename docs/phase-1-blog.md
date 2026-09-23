@@ -1,6 +1,6 @@
 # Building a BEAM-Native Job Queue: Introducing Kathikon Phase 1
 
-> **Historical:** This article describes Kathikon v0.1.0 (Phase 1). Current release is v0.2.0 — see [documentation index](documentation.md).
+> **Historical:** This article describes Kathikon v0.1.0 (Phase 1). Current release is v0.3.0 — see [documentation index](documentation.md).
 
 *How we designed a durable obligation system using OTP, Mnesia, and explicit state machines — without PostgreSQL or Redis.*
 

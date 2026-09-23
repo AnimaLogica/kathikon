@@ -417,7 +417,7 @@ defmodule Kathikon.Dashboard do
   end
 
   defp job_timestamp(job) do
-    job.completed_at || job.started_at || job.inserted_at || job.available_at
+    job.completed_at || job.inserted_at
   end
 
   defp matching_jobs(opts) do

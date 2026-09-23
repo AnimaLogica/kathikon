@@ -13,6 +13,14 @@ Kathikon uses **Mnesia** as its coordination store and **OTP** as its execution 
 
 ## Status
 
+**v0.3.0 - LiveDashboard**
+
+- `Kathikon.LiveDashboard.Page` — Kathikon tab in Phoenix LiveDashboard
+- Pause, resume, cancel, filter, search, retry, and paginated job lists
+- Phoenix setup guide, Playground demo, and Livebook
+
+![Kathikon LiveDashboard](docs/screenshots/dashboard-screenshot.png)
+
 **v0.2.1 - Operations tooling**
 
 - `Kathikon.Dashboard` - inspect and control facade for UIs and RPC
@@ -35,12 +43,12 @@ Previous: **v0.1.0 - Phase 1: Durable Job Queue**
 ```elixir
 def deps do
   [
-    {:kathikon, "~> 0.2.1"}
+    {:kathikon, "~> 0.3.0"}
   ]
 end
 ```
 
-## Quick start
+The [Quick start](docs/guides/quick-start.md) guide covers configuration, a worker, and the first job (v0.3.0). A short version:
 
 Define a worker:
 
@@ -177,16 +185,19 @@ See [Management API](docs/management_api.md) and `Kathikon.Dashboard` docs.
 
 ## Roadmap
 
-| Phase | Focus |
-|-------|-------|
-| 1 | Durable job queue (done) |
-| 2 | Distributed coordination, leases, lifeline |
-| 3 | Uniqueness, dynamic queues (cron done in v0.2) |
-| 4 | Rate limits (pause/resume done in v0.2) |
-| 5 | Batches (done in v0.2) |
-| 6 | Observability APIs (reporting done in v0.2) |
-| 7 | Workflows and DAGs |
-| 8 | LiveView dashboard UI (ops API done in v0.2.1) |
+| Release | Focus |
+|---------|--------|
+| v0.1.0 | Durable job queue (done) |
+| v0.2.0 | Control, scheduling, batches, and correctness (done) |
+| v0.2.1 | Operations tooling: Dashboard facade, CLI, and RPC (done) |
+| v0.3.0 | LiveDashboard page for a Phoenix app (done) |
+| v0.4.0 | Workflows and DAGs |
+| v0.5.0 | Ecto storage backend (PostgreSQL) |
+| v0.6.0 | MongoDB storage backend |
+| v0.7.0 | SQS backend, for jobs that should leave the BEAM |
+| v0.8.0 | Distributed coordination: leases, lifeline, worker ownership |
+| v0.9.0 | Uniqueness, dynamic queues, and rate limits |
+| v1.0.0 | Stable public API and storage contract, plus a full operator LiveView |
 
 ## Documentation
 
@@ -200,6 +211,7 @@ open doc/index.html
 - **[Documentation index](docs/documentation.md)** - guides and module reference (source)
 - [CHANGELOG](CHANGELOG.md) - release history
 - [Quick start](docs/guides/quick-start.md)
+- [LiveDashboard in a Phoenix app](docs/guides/live-dashboard.md)
 - [Module reference](docs/reference/modules.md)
 - [Configuration](docs/guides/configuration.md)
 - [Interactive demo (Livebook)](livebooks/kathikon_demo.livemd)

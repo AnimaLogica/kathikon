@@ -239,6 +239,17 @@ defmodule Kathikon.Storage.MnesiaTest do
 
       assert Mnesia.promote_scheduled(now) == 2
     end
+
+    test "promote_scheduled returns 0 when mnesia is stopped" do
+      on_exit(fn ->
+        {:ok, _} = Application.ensure_all_started(:mnesia)
+        Kathikon.TestSupport.ensure_runtime!()
+        Storage.setup()
+      end)
+
+      :ok = Application.stop(:mnesia)
+      assert Mnesia.promote_scheduled(DateTime.utc_now()) == 0
+    end
   end
 
   describe "mnesia context mock" do
@@ -279,6 +290,110 @@ defmodule Kathikon.Storage.MnesiaTest do
 
       assert {:error, :history_failed} =
                Mnesia.insert_history_event("job-id", %{id: "evt", job_id: "job-id"})
+    end
+
+    test "claim and batch aborts use the context mock" do
+      Mox.expect(ContextMock, :transaction, fn _fun -> {:aborted, :weird} end)
+
+      assert {:error, :weird} = Mnesia.claim_job("job-id", claimant())
+
+      child =
+        available_job()
+        |> Map.put(:batch_id, "batch-1")
+
+      Mox.expect(ContextMock, :transaction, fn _fun -> {:aborted, :other_reason} end)
+
+      assert {:error, :other_reason} = Mnesia.record_batch_child_finished(child)
+    end
+  end
+
+  describe "error branches" do
+    test "missing jobs and illegal transitions return errors" do
+      assert {:error, :not_found} = Mnesia.update_job("missing", %{priority: 1})
+      assert {:error, :not_found} = Mnesia.claim_job("missing", claimant())
+      assert {:error, :not_found} = Mnesia.defer_job("missing", DateTime.utc_now(), %{})
+      assert {:error, :not_found} = Mnesia.start_batch("missing", [], %{batch_id: "b"})
+
+      {:ok, available} = Storage.insert(available_job())
+
+      assert {:error, {:invalid_state, :available}} =
+               Mnesia.defer_job(available.id, DateTime.utc_now(), %{})
+
+      assert {:error, {:invalid_state, :available}} =
+               Mnesia.fail_job(available.id, :boom, %{attempt: 1})
+
+      assert {:error, {:invalid_state, :available}} =
+               Mnesia.start_batch(available.id, [], %{batch_id: "b-idle"})
+
+      assert {:ok, _jobs} = Mnesia.list_jobs()
+      assert {:ok, %{jobs: page, total: total}} = Mnesia.list_jobs_page()
+      assert is_list(page)
+      assert is_integer(total)
+
+      assert {:ok, [_ | _]} = Mnesia.list_jobs(queue: :default, state: :available)
+    end
+
+    test "update_job changes state and rejects unknown string keys" do
+      {:ok, job} = Storage.insert(available_job())
+
+      assert {:ok, cancelled} = Mnesia.update_job(job.id, %{state: :cancelled})
+      assert cancelled.state == :cancelled
+
+      assert {:ok, unchanged} =
+               Mnesia.update_job(job.id, %{"kathikon_unknown_field_zz" => 1})
+
+      assert unchanged.state == :cancelled
+    end
+
+    test "discard covers scheduled, failed, and already discarded jobs" do
+      {:ok, scheduled} =
+        Storage.insert(available_job() |> Map.put(:state, :scheduled))
+
+      assert {:error, {:invalid_transition, :scheduled, :discarded}} =
+               Mnesia.discard_job(scheduled.id, :manual, %{})
+
+      {:ok, failed} = Storage.insert(available_job() |> Map.put(:state, :failed))
+      assert {:ok, discarded} = Mnesia.discard_job(failed.id, :manual, %{})
+      assert discarded.state == :discarded
+      assert {:ok, again} = Mnesia.discard_job(failed.id, :again, %{})
+      assert again.state == :discarded
+    end
+
+    test "start_batch rejects a duplicate child and a finished batch ignores another child" do
+      child = available_job()
+      {:ok, child} = Storage.insert(child)
+
+      parent =
+        available_job()
+        |> Map.put(:state, :running)
+
+      {:ok, parent} = Storage.insert(parent)
+
+      assert {:error, {:already_exists, _}} =
+               Mnesia.start_batch(parent.id, [child], %{batch_id: "dup"})
+
+      fresh_child =
+        available_job()
+        |> Map.put(:state, :completed)
+
+      {:ok, batch} =
+        Mnesia.start_batch(parent.id, [fresh_child], %{
+          batch_id: "once",
+          status: :running,
+          success_policy: :all_succeeded,
+          success_count: 0,
+          failure_count: 0,
+          cancelled_count: 0
+        })
+
+      assert batch.batch_id == "once"
+
+      finished = %{fresh_child | batch_id: "once", state: :completed}
+      assert {:ok, :complete, _batch, _parent} = Mnesia.record_batch_child_finished(finished)
+      assert {:ok, :already_finished} = Mnesia.record_batch_child_finished(finished)
+
+      missing = %{fresh_child | batch_id: "missing-batch"}
+      assert {:error, :not_found} = Mnesia.record_batch_child_finished(missing)
     end
   end
 end
