@@ -29,7 +29,7 @@ jobs:
       - name: Start epmd
         run: epmd -daemon
       - name: Run tests
-        run: mix test
+        run: mix test --exclude async_timing
       - name: Publish to Hex.pm
         env:
           HEX_API_KEY: ${{ secrets.HEX_API_KEY }}

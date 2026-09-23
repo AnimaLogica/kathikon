@@ -202,6 +202,8 @@ defmodule Kathikon.Dispatcher do
     {:ok, job}
   end
 
+  defp emit_stop({:error, _reason}, _metadata, _duration), do: nil
+
   defp emit_failure({:ok, job}, metadata, duration) do
     if job.state == :dead do
       Telemetry.event([:job, :dead], %{duration: duration}, metadata)
@@ -217,12 +219,16 @@ defmodule Kathikon.Dispatcher do
     {:ok, job}
   end
 
+  defp emit_failure({:error, _reason}, _metadata, _duration), do: nil
+
   defp emit_retry(result, metadata, duration), do: emit_failure(result, metadata, duration)
 
   defp emit_discard({:ok, job}, metadata, duration) do
     Telemetry.event([:job, :discard], %{duration: duration}, metadata)
     {:ok, job}
   end
+
+  defp emit_discard({:error, _reason}, _metadata, _duration), do: nil
 
   defp job_metadata(%Job{} = job) do
     %{

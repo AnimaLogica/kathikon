@@ -183,7 +183,7 @@ defmodule Kathikon.LiveDashboard.PageTest do
   test "mount, refresh, and events drive the page" do
     on_exit(fn -> Dashboard.resume_all() end)
 
-    available = insert_state(:available, Kathikon.Workers.SuccessWorker, %{})
+    {:ok, _} = insert_state(:available, Kathikon.Workers.SuccessWorker, %{})
     retryable = insert_state(:retryable, Kathikon.Workers.FailWorker, %{})
 
     {:ok, socket} = Page.mount(%{}, %{}, %Phoenix.LiveView.Socket{})
@@ -219,11 +219,12 @@ defmodule Kathikon.LiveDashboard.PageTest do
 
     {:noreply, _} = Page.handle_refresh(paged)
 
-    {:ok, available_job} = available
+    :ok = Kathikon.pause_queue(:default)
+    {:ok, available_job} = insert_state(:available, Kathikon.Workers.SuccessWorker, %{})
     {:noreply, killed} = Page.handle_event("kill_all", %{}, cleared)
     assert {:ok, %{state: :cancelled}} = Storage.fetch(available_job.id)
 
-    {:ok, retryable_job} = retryable
+    {:ok, retryable_job} = insert_state(:retryable, Kathikon.Workers.FailWorker, %{})
     {:noreply, retried} = Page.handle_event("retry", %{"id" => retryable_job.id}, killed)
     assert {:ok, %{state: :available}} = Storage.fetch(retryable_job.id)
 

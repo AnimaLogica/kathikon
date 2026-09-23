@@ -22,10 +22,17 @@ defmodule Kathikon.DispatcherTest do
         storage: @mock
       )
 
+    Process.unlink(dispatcher)
     Mox.allow(@mock, self(), dispatcher)
 
     on_exit(context, fn ->
-      if Process.alive?(dispatcher), do: GenServer.stop(dispatcher)
+      if Process.alive?(dispatcher) do
+        try do
+          GenServer.stop(dispatcher)
+        catch
+          :exit, _ -> :ok
+        end
+      end
     end)
 
     %{dispatcher: dispatcher, queue: queue}
@@ -139,6 +146,19 @@ defmodule Kathikon.DispatcherTest do
     end)
 
     poll_and_await(dispatcher, test_pid)
+  end
+
+  test "ignores a missing job when the worker finishes", %{dispatcher: dispatcher, queue: queue} do
+    work = job(Kathikon.Workers.SuccessWorker, %{}, queue: queue)
+    {_running, test_pid} = expect_claim_and_start(work, queue)
+
+    Mox.expect(@mock, :complete_job, fn _id, :ok, _meta ->
+      send(test_pid, {:dispatcher_done, :missing})
+      {:error, :not_found}
+    end)
+
+    poll_and_await(dispatcher, test_pid)
+    assert :sys.get_state(dispatcher).queue == queue
   end
 
   test "ignores claim errors", %{dispatcher: dispatcher, queue: queue} do

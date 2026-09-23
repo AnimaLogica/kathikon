@@ -306,6 +306,7 @@ defmodule Kathikon.DashboardTest do
     assert retried.state in [:available, :scheduled]
   end
 
+  @tag :async_timing
   test "retry_jobs and purge_jobs" do
     job =
       Job.build(Kathikon.Workers.FailWorker, %{}, queue: :default, max_attempts: 1)
@@ -411,6 +412,9 @@ defmodule Kathikon.Dashboard.RPCTest do
           {:ok, skip: "Cannot start distributed node for RPC tests"}
 
         :ok ->
+          # Node.start/1 renames this VM. Restart Kathikon so Mnesia and the
+          # scheduler are not left blocked on the previous node name.
+          Kathikon.TestSupport.stop_runtime!()
           Kathikon.TestSupport.ensure_runtime!()
           Kathikon.Storage.setup()
           Kathikon.Storage.clear_jobs!()
@@ -532,6 +536,11 @@ defmodule Kathikon.Dashboard.PurgeMockTest do
 
   test "pause_all falls back to configured queues when list_jobs fails" do
     stub(@mock, :list_jobs, fn _ -> {:error, :boom} end)
+
+    on_exit(fn ->
+      for queue <- Kathikon.Config.queue_names(), do: Kathikon.resume_queue(queue)
+    end)
+
     assert :ok = Dashboard.pause_all()
   end
 

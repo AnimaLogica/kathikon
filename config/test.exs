@@ -1,6 +1,10 @@
 import Config
 
 config :kathikon,
+  # Stay on RAM copies even if an RPC test calls Node.start/1. Auto mode
+  # switches to disc once the node is no longer nonode@nohost, and that
+  # rebuild breaks the running dispatchers.
+  mnesia_copies: :ram,
   poll_interval: 50,
   scheduler_interval: 50,
   cron_tick: false,
