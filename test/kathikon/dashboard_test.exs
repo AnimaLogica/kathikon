@@ -556,11 +556,14 @@ defmodule Mix.Tasks.Kathikon.OpsTest do
 
   import ExUnit.CaptureIO
 
+  alias Kathikon.{Dashboard, Job, Storage}
   alias Mix.Tasks.Kathikon.Ops
 
   setup do
-    Kathikon.Storage.setup()
-    Kathikon.Storage.clear_jobs!()
+    Kathikon.TestSupport.ensure_runtime!()
+    Storage.setup()
+    Storage.clear_jobs!()
+    on_exit(fn -> Dashboard.resume_all() end)
     :ok
   end
 
@@ -603,5 +606,128 @@ defmodule Mix.Tasks.Kathikon.OpsTest do
       end)
 
     assert output =~ "out of 0"
+  end
+
+  test "prints usage when no command is given" do
+    stderr =
+      capture_io(:stderr, fn ->
+        stdout = capture_io(fn -> Ops.run([]) end)
+        send(self(), {:stdout, stdout})
+      end)
+
+    assert_received {:stdout, stdout}
+    assert stdout <> stderr =~ "usage: mix kathikon.ops COMMAND [options]"
+    assert stdout <> stderr =~ "summary"
+  end
+
+  test "summary, jobs, and show print local queue data" do
+    job = insert_ops_job(:completed)
+    :ok = Dashboard.pause_queue(:default)
+
+    summary =
+      capture_io(fn ->
+        Ops.run(["summary"])
+      end)
+
+    assert summary =~ "Queue"
+    assert summary =~ "default"
+    assert summary =~ "yes"
+
+    jobs =
+      capture_io(fn ->
+        Ops.run(["jobs", "--tab", "completed", "--limit", "10", "--offset", "0"])
+      end)
+
+    assert jobs =~ job.id
+    assert jobs =~ "out of"
+
+    blank =
+      insert_ops_job(:completed) |> Map.put(:inserted_at, nil) |> Map.put(:completed_at, nil)
+
+    {:ok, _} = Storage.update(blank)
+
+    undated =
+      capture_io(fn ->
+        Ops.run(["jobs", "--state", "completed"])
+      end)
+
+    assert undated =~ blank.id
+
+    detail =
+      capture_io(fn ->
+        Ops.run(["show", job.id])
+      end)
+
+    assert detail =~ "job:"
+    assert detail =~ "history events:"
+  end
+
+  test "pause, resume, cancel, retry, rerun, purge, and prune" do
+    available = insert_ops_job(:available)
+    retryable = insert_ops_job(:retryable)
+    completed = insert_ops_job(:completed)
+    dead = insert_ops_job(:dead)
+
+    assert capture_io(fn -> Ops.run(["pause", "--all"]) end) =~ "ok"
+    assert capture_io(fn -> Ops.run(["resume", "--queue", "default"]) end) =~ "ok"
+
+    assert capture_io(fn -> Ops.run(["cancel", available.id]) end) =~ "state=cancelled"
+
+    assert capture_io(fn -> Ops.run(["retry", retryable.id]) end) =~ "ok"
+
+    assert capture_io(fn -> Ops.run(["rerun", completed.id]) end) =~ "ok"
+
+    bulk =
+      capture_io(fn ->
+        Ops.run(["retry", "--queue", "default"])
+      end)
+
+    assert bulk =~ "succeeded:"
+    assert bulk =~ "errors:"
+    assert bulk =~ dead.id
+
+    purged =
+      capture_io(fn ->
+        Ops.run(["purge", "--state", "cancelled"])
+      end)
+
+    assert purged =~ "Purged"
+
+    assert capture_io(fn -> Ops.run(["prune"]) end) =~ "ok"
+  end
+
+  test "pause without a target and unknown commands fail" do
+    assert capture_io(:stderr, fn ->
+             assert_raise Mix.Error, ~r/--queue NAME or --all/, fn ->
+               Ops.run(["pause"])
+             end
+           end)
+
+    assert capture_io(:stderr, fn ->
+             assert_raise Mix.Error, ~r/unknown command/, fn ->
+               Ops.run(["nope"])
+             end
+           end)
+
+    assert capture_io(:stderr, fn ->
+             assert_raise Mix.Error, ~r/RPC/, fn ->
+               Ops.run(["--node", "missing@127.0.0.1", "summary"])
+             end
+           end)
+
+    assert capture_io(:stderr, fn ->
+             assert_raise Mix.Error, fn ->
+               Ops.run(["cancel", "missing-job"])
+             end
+           end)
+  end
+
+  defp insert_ops_job(state) do
+    job =
+      Job.build(Kathikon.Workers.SuccessWorker, %{}, queue: :default)
+      |> Map.put(:state, state)
+
+    {:ok, inserted} = Storage.insert(job)
+    inserted
   end
 end

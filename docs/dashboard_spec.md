@@ -183,9 +183,15 @@ mix kathikon.ops pause --all
 mix kathikon.ops --node kathikon@host summary
 ```
 
+## LiveDashboard page
+
+Optional Phoenix LiveDashboard tab: `Kathikon.LiveDashboard.Page`. Register it from the host router and set `allow_destructive_actions: true` so pause, kill, and retry are enabled. See [LiveDashboard in a Phoenix app](guides/live-dashboard.md).
+
+Demo: `examples/live_dashboard_ops.exs` and [livebooks/live_dashboard.livemd](../livebooks/live_dashboard.livemd).
+
 ## Future work
 
-- Phoenix LiveView dashboard subscribing to `[:kathikon, :job, :*]` (debounced)
+- Full operator LiveView (state tabs and bulk actions) subscribing to `[:kathikon, :job, :*]` (debounced)
 - Optional TUI for SSH-only environments
 - Batch status and children links in job detail when `batch_id` is set
 

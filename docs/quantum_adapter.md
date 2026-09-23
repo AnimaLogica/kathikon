@@ -6,7 +6,7 @@ Quantum owns clock-based triggering. Kathikon owns durable work.
 
 ```elixir
 # mix.exs
-{:kathikon, "~> 0.2.1"},
+{:kathikon, "~> 0.3.0"},
 {:quantum, "~> 3.5"}
 ```
 

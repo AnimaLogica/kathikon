@@ -38,7 +38,21 @@ fields (`ui_counts`, queues seen in storage) and delegates management to
 
 CLI: `mix kathikon.ops summary`
 
-Remote: `mix kathikon.ops --node kathikon@host summary` (via `Kathikon.Dashboard.RPC`).
+## LiveDashboard (optional)
+
+Add a **Kathikon** tab to Phoenix LiveDashboard. Setup for a host app is in [LiveDashboard in a Phoenix app](guides/live-dashboard.md).
+
+```elixir
+live_dashboard "/dashboard",
+  additional_pages: [kathikon: Kathikon.LiveDashboard.Page],
+  allow_destructive_actions: true
+```
+
+`allow_destructive_actions: true` enables pause, kill, and retry. Without a Phoenix app, use `iex examples/live_dashboard_ops.exs` or [livebooks/live_dashboard.livemd](../livebooks/live_dashboard.livemd).
+
+## Remote ops
+
+`mix kathikon.ops --node kathikon@host summary` calls the node through `Kathikon.Dashboard.RPC`.
 
 Both nodes must share the same Erlang cookie. The machine running `mix kathikon.ops` must be a **named node**, for example:
 

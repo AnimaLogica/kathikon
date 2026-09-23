@@ -67,4 +67,27 @@ defmodule Kathikon.StorageBehaviourTest do
     assert {:ok, dead_jobs} = Storage.list_dead_jobs([])
     assert Enum.any?(dead_jobs, &(&1.id == id))
   end
+
+  test "update_job delegates through the facade" do
+    job =
+      Job.build(Kathikon.Workers.SuccessWorker, %{}, queue: :default)
+      |> Map.put(:state, :available)
+
+    {:ok, id} = Storage.insert_job(job)
+    assert {:ok, updated} = Storage.update_job(id, %{priority: 7})
+    assert updated.priority == 7
+  end
+
+  test "with_backend restores the previous override" do
+    assert :ok = Storage.set_test_backend!(Kathikon.Storage.Mnesia)
+
+    result =
+      Storage.with_backend(Kathikon.Storage.Mock, fn ->
+        Storage.backend()
+      end)
+
+    assert result == Kathikon.Storage.Mock
+    assert Storage.backend() == Kathikon.Storage.Mnesia
+    assert :ok = Storage.clear_test_backend!()
+  end
 end

@@ -1,27 +1,13 @@
-<!-- livebook:{"autosave_interval_s":null} -->
-
 # Kathikon Demo
-
-## Intro
-
-**Kathikon** is a BEAM-native durable job queue. Jobs live in Mnesia and run through explicit states: `scheduled → available → claimed → running → completed | retryable | dead | cancelled`.
-
-Run the setup cells top-to-bottom, then try each demo section.
-
-## Setup
-
-### Install & configure
-
-Livebook runs on a named node without a Mnesia disc directory — use `mnesia_copies: :ram` (also auto-detected when the node name contains `livebook`).
-
-Use `env: :prod` so `Mix.install` only pulls runtime deps (`:telemetry`). `env: :dev` would require dev-only tools (`ex_doc`, `sobelow`, …) that are not fetched in Livebook.
 
 ```elixir
 Mix.install(
   [
-    {:kathikon, path: Path.expand("..", __DIR__), env: :prod},
+    # {:kathikon, path: Path.expand("..", __DIR__), env: :prod},
+    {:kathikon, "~> 0.3.0"},
     {:kino, "~> 0.19.0"},
-    {:kino_vega_lite, "~> 0.1.11"}
+    {:kino_vega_lite, "~> 0.1.11"},
+    {:tzdata, "~> 1.2"}
   ],
   config: [
     kathikon: [
@@ -40,6 +26,22 @@ Mix.install(
   ]
 )
 ```
+
+## Intro
+
+**Kathikon v0.3.0** is a BEAM-native durable job queue. Jobs live in Mnesia and run through explicit states: `scheduled → available → claimed → running → completed | retryable | dead | cancelled`. This notebook uses the local repo, not a Hex pin.
+
+Run the setup cells top-to-bottom, then try each demo section.
+
+## Setup
+
+### Install & configure
+
+Livebook runs on a named node without a Mnesia disc directory — use `mnesia_copies: :ram` (also auto-detected when the node name contains `livebook`).
+
+Use `env: :prod` so `Mix.install` only pulls runtime deps (`:telemetry`). `env: :dev` would require dev-only tools (`ex_doc`, `sobelow`, …) that are not fetched in Livebook.
+
+<!-- livebook:{"break_markdown":true} -->
 
 ### Reset demo jobs
 
