@@ -1,4 +1,4 @@
-# Kathikon v0.2.0: Control, Scheduling, and Batches
+# Control, Scheduling, and Batches
 
 A durable job queue treats every unit of work as an obligation that must eventually reach a known terminal state. That sounds simple until you run jobs concurrently on the BEAM.
 

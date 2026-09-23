@@ -4,7 +4,7 @@ Kathikon v0.2.0 introduces a formal `Kathikon.Storage` behaviour. Mnesia remains
 
 ## Why a behaviour?
 
-Alternate backends (ETS-only tests, future Postgres adapters) can implement the same atomic callbacks without changing dispatchers or management APIs.
+Alternate backends can implement the same atomic callbacks without changing dispatchers or management APIs. Planned backends are Ecto (v0.5.0), MongoDB (v0.6.0), and SQS (v0.7.0).
 
 ## Atomic operations
 
