@@ -10,6 +10,9 @@ defmodule Kathikon.ReportTest do
   end
 
   test "queue summary and job counts" do
+    :ok = Kathikon.pause_queue(:default)
+    on_exit(fn -> Kathikon.resume_queue(:default) end)
+
     job =
       Job.build(Kathikon.Workers.SuccessWorker, %{}, queue: :default)
       |> Map.put(:state, :available)

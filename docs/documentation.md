@@ -2,20 +2,11 @@
 
 Kathikon (καθήκον — duty, obligation) is a BEAM-native durable job queue for Elixir. Jobs are persisted in Mnesia, executed by OTP supervisors and dispatchers, and tracked through an explicit state machine.
 
-**Current release:** v0.2.1 — operations tooling (`Kathikon.Dashboard`, `mix kathikon.ops`)
+**Current release:** v0.3.0 — LiveDashboard page (`Kathikon.LiveDashboard.Page`)
 
-Previous: **v0.2.0** — control, scheduling, batches, and correctness
-
-## v0.2.1 topics
-
-| Document | Contents |
-|----------|----------|
-| [Management API](management_api.md) | Dashboard facade, `mix kathikon.ops`, remote RPC |
-| [Dashboard spec](dashboard_spec.md) | Operator UI layout, state tabs, and API mapping |
+Previous: **v0.2.1** — operations tooling (`Kathikon.Dashboard`, `mix kathikon.ops`). **v0.2.0** — control, scheduling, batches, and correctness.
 
 ## Guides
-
-Start here if you are new to the library:
 
 | Guide | What you will learn |
 |-------|---------------------|
@@ -23,22 +14,19 @@ Start here if you are new to the library:
 | [Workers](guides/workers.md) | The `Kathikon.Worker` behaviour, return values, errors |
 | [Queues & concurrency](guides/queues-and-concurrency.md) | Multiple queues, dispatcher concurrency, isolation |
 | [Scheduling](guides/scheduling.md) | `schedule_in`, `schedule_at`, cron, scheduler promotion |
+| [Scheduling reference](scheduling.md) | One-time and recurring schedules, timezone |
 | [Retries & errors](guides/retries-and-errors.md) | Backoff, `max_attempts`, dead-letter, error recording |
 | [Cancellation](guides/cancellation.md) | When jobs can be cancelled, API usage |
+| [Storage](storage.md) | Storage behaviour, Mnesia tables, lifecycle |
+| [Storage & embedding](guides/storage-and-embedding.md) | Mnesia setup, Livebook, tests, backends |
+| [Job lifecycle](job_lifecycle.md) | State machine and history events |
+| [Batches](batches.md) | Fan-out/fan-in parent/child workflows |
+| [Management API](management_api.md) | Claim, retry, dead-letter, queue control, ops CLI |
+| [LiveDashboard](guides/live-dashboard.md) | Add the Kathikon tab to a Phoenix LiveDashboard |
+| [Dashboard spec](dashboard_spec.md) | Operator UI layout, state tabs, and API mapping |
+| [Reporting](reporting.md) | Queue and failure summaries |
 | [Telemetry](guides/telemetry-and-observability.md) | Events, measurements, metadata, custom handlers |
 | [Configuration](guides/configuration.md) | All `config :kathikon` keys and environments |
-| [Storage & embedding](guides/storage-and-embedding.md) | Mnesia setup, Livebook, tests, backends |
-
-## v0.2.0 topics
-
-| Document | Contents |
-|----------|----------|
-| [Storage](storage.md) | Storage behaviour, Mnesia tables, lifecycle |
-| [Job lifecycle](job_lifecycle.md) | State machine and history events |
-| [Scheduling](scheduling.md) | One-time and recurring schedules, timezone |
-| [Batches](batches.md) | Fan-out/fan-in parent/child workflows |
-| [Management API](management_api.md) | Claim, retry, dead-letter, queue control |
-| [Reporting](reporting.md) | Queue and failure summaries |
 | [Quantum adapter](quantum_adapter.md) | Optional Quantum scheduler integration |
 | [Architecture](architecture.md) | Supervision tree and runtime components |
 
@@ -48,6 +36,7 @@ Start here if you are new to the library:
 |----------|----------|
 | [Module reference](reference/modules.md) | Every module and public function with examples |
 | [Interactive demo](../livebooks/kathikon_demo.livemd) | Livebook walkthrough |
+| [LiveDashboard](../livebooks/live_dashboard.livemd) | Control panel plus queue health page |
 
 ## Examples
 
@@ -60,6 +49,7 @@ Runnable scripts in `examples/` at the project root — run with `mix run exampl
 | `examples/dead_letter_retry.exs` | Failures, dead letter, rerun |
 | `examples/batch_fanout_fanin.exs` | Parent/child batches |
 | `examples/reporting.exs` | `Kathikon.Report` summaries |
+| `examples/live_dashboard_ops.exs` | Playground control panel and LiveDashboard |
 | `examples/quantum_scheduler_adapter.exs` | Optional Quantum scheduler |
 
 ## Architecture at a glance

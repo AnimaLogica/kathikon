@@ -8,7 +8,7 @@ Get a working job queue in your Elixir application in a few minutes.
 # mix.exs
 def deps do
   [
-    {:kathikon, "~> 0.2.1"}
+    {:kathikon, "~> 0.3.0"}
   ]
 end
 ```
