@@ -46,38 +46,6 @@ defmodule Kathikon.Storage.Mnesia.IntegrationTest do
     end
   end
 
-  defp suspend_kathikon_runtime! do
-    for name <- [Kathikon.Scheduler.Promoter, Kathikon.Pruner] do
-      case Process.whereis(name) do
-        nil -> :ok
-        pid -> :sys.suspend(pid)
-      end
-    end
-
-    for queue <- Kathikon.Config.queue_names() do
-      case Registry.lookup(Kathikon.Registry, {:dispatcher, queue}) do
-        [{pid, _}] -> :sys.suspend(pid)
-        [] -> :ok
-      end
-    end
-  end
-
-  defp resume_kathikon_runtime! do
-    for name <- [Kathikon.Scheduler.Promoter, Kathikon.Pruner] do
-      case Process.whereis(name) do
-        nil -> :ok
-        pid -> :sys.resume(pid)
-      end
-    end
-
-    for queue <- Kathikon.Config.queue_names() do
-      case Registry.lookup(Kathikon.Registry, {:dispatcher, queue}) do
-        [{pid, _}] -> :sys.resume(pid)
-        [] -> :ok
-      end
-    end
-  end
-
   defp refute_table!(table) do
     if table in :mnesia.system_info(:tables) do
       flunk(
@@ -145,12 +113,12 @@ defmodule Kathikon.Storage.Mnesia.IntegrationTest do
   end
 
   test "clear_jobs! is a no-op when the jobs table does not exist" do
-    suspend_kathikon_runtime!()
+    Kathikon.TestSupport.stop_runtime!()
 
     on_exit(fn ->
-      resume_kathikon_runtime!()
       ensure_mnesia!()
       Storage.setup()
+      Kathikon.TestSupport.ensure_runtime!()
     end)
 
     assert :kathikon_jobs in :mnesia.system_info(:tables)

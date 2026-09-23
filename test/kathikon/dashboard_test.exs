@@ -411,6 +411,9 @@ defmodule Kathikon.Dashboard.RPCTest do
           {:ok, skip: "Cannot start distributed node for RPC tests"}
 
         :ok ->
+          # Node.start/1 renames this VM. Restart Kathikon so Mnesia and the
+          # scheduler are not left blocked on the previous node name.
+          Kathikon.TestSupport.stop_runtime!()
           Kathikon.TestSupport.ensure_runtime!()
           Kathikon.Storage.setup()
           Kathikon.Storage.clear_jobs!()
