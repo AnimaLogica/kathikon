@@ -13,6 +13,12 @@ Kathikon uses **Mnesia** as its coordination store and **OTP** as its execution 
 
 ## Status
 
+**v0.4.0 - Bulk job submission**
+
+- `Kathikon.insert_many/2` — chunked enqueue of independent jobs
+- `Kathikon.Batch.open/2`, `append/2`, and `close/1` — stream map/reduce children without holding every spec in memory
+- Storage `insert_jobs/2`, implemented transactionally by Mnesia
+
 **v0.3.0 - LiveDashboard**
 
 - `Kathikon.LiveDashboard.Page` — Kathikon tab in Phoenix LiveDashboard
@@ -43,12 +49,12 @@ Previous: **v0.1.0 - Phase 1: Durable Job Queue**
 ```elixir
 def deps do
   [
-    {:kathikon, "~> 0.3.0"}
+    {:kathikon, "~> 0.4.0"}
   ]
 end
 ```
 
-The [Quick start](docs/guides/quick-start.md) guide covers configuration, a worker, and the first job (v0.3.0). A short version:
+The [Quick start](docs/guides/quick-start.md) guide covers configuration, a worker, and the first job (v0.4.0). A short version:
 
 Define a worker:
 
@@ -191,13 +197,13 @@ See [Management API](docs/management_api.md) and `Kathikon.Dashboard` docs.
 | v0.2.0 | Control, scheduling, batches, and correctness (done) |
 | v0.2.1 | Operations tooling: Dashboard facade, CLI, and RPC (done) |
 | v0.3.0 | LiveDashboard page for a Phoenix app (done) |
-| v0.4.0 | Workflows and DAGs |
-| v0.5.0 | Ecto storage backend (PostgreSQL) |
-| v0.6.0 | MongoDB storage backend |
-| v0.7.0 | SQS backend, for jobs that should leave the BEAM |
-| v0.8.0 | Distributed coordination: leases, lifeline, worker ownership |
-| v0.9.0 | Uniqueness, dynamic queues, and rate limits |
-| v1.0.0 | Stable public API and storage contract, plus a full operator LiveView |
+| v0.4.0 | Bulk job submission (chunked insert) |
+| v0.5.0 | Workflows and DAGs (large fan-out uses `Batch.append/2` on `insert_jobs/2`) |
+| v0.6.0 | Ecto storage backend (PostgreSQL) |
+| v0.7.0 | MongoDB storage backend |
+| v0.8.0 | SQS backend, for jobs that should leave the BEAM |
+| v0.9.0 | Distributed coordination: leases, lifeline, worker ownership |
+| v1.0.0 | Uniqueness, dynamic queues, rate limits, and a stable public API plus a full operator LiveView |
 
 ## Documentation
 

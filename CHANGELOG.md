@@ -5,6 +5,19 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-10-08
+
+### Added
+
+- `Kathikon.insert_many/2` — chunked enqueue of independent jobs, with partial success, no `:inserted` history row unless `history: true`, and one `[:kathikon, :job, :inserted_many]` event per chunk.
+- `Kathikon.Storage.insert_jobs/2` — optional bulk-write callback. Mnesia commits one transaction per chunk. Backends that omit it fall back to `insert/1`.
+- `Kathikon.Batch.open/2`, `append/2`, and `close/1` — stream map/reduce children (for example a crawler) through `insert_jobs/2`. The parent stays `:running` until `close/1` seals `expected_count`. `start/3` is open, one append, and close.
+- `docs/guides/bulk-enqueue.md`, `examples/bulk_enqueue.exs`, and `examples/benchmark_bulk_enqueue.exs`.
+
+### Changed
+
+- Roadmap: bulk enqueue is v0.4.0. Workflows and DAGs move to v0.5.0, Ecto to v0.6.0, MongoDB to v0.7.0, SQS to v0.8.0, and distributed coordination to v0.9.0. Uniqueness, dynamic queues, rate limits, and the stable API are v1.0.0.
+
 ## [0.3.0] - 2026-09-23
 
 ### Added

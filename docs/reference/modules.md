@@ -1,6 +1,6 @@
 # Module reference
 
-Public API and runtime modules for Kathikon v0.3.0. For narrative guides see the [documentation index](../documentation.html) or [quick start](../guides/quick-start.html).
+Public API and runtime modules for Kathikon v0.4.0. For narrative guides see the [documentation index](../documentation.html) or [quick start](../guides/quick-start.html).
 
 ---
 
@@ -50,6 +50,15 @@ Enqueues a job. Starts the target queue dispatcher if needed. Emits `[:kathikon,
   Kathikon.insert(ReportWorker, %{},
     schedule_at: ~U[2026-12-25 09:00:00Z]
   )
+```
+
+### `insert_many/2`
+
+Chunked enqueue of independent jobs. See [Bulk enqueue](../guides/bulk-enqueue.md).
+
+```elixir
+{:ok, %{inserted: n, ids: ids, errors: []}} =
+  Kathikon.insert_many([{MyWorker, %{"n" => 1}}, {MyWorker, %{"n" => 2}}], chunk_size: 500)
 ```
 
 ### `cancel/1`
@@ -345,12 +354,16 @@ Registered as `Kathikon.Pruner` when started by the application.
 
 ### Kathikon.Batch
 
-Fan-out/fan-in workflows. Parent job enters `:waiting_for_children`; children carry `batch_id` and `parent_job_id` metadata.
+Fan-out/fan-in workflows. `start/3` opens, appends, and closes. `open/2` leaves the parent `:running` until `close/1`. Children carry `batch_id` and `parent_job_id`.
 
 ```elixir
 {:ok, batch} = Kathikon.Batch.start(parent_id, [
   {ChildWorker, %{"id" => 1}, [queue: :default]}
 ], on_complete: {ReportWorker, %{}})
+
+{:ok, batch} = Kathikon.Batch.open(parent_id, on_complete: {ReduceWorker, %{}})
+{:ok, _} = Kathikon.Batch.append(batch.batch_id, child_specs)
+:ok = Kathikon.Batch.close(batch.batch_id)
 ```
 
 ### Kathikon.Report

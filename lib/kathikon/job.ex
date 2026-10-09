@@ -127,7 +127,7 @@ defmodule Kathikon.Job do
     {state, scheduled_at, available_at} = schedule_fields(opts, now)
 
     %__MODULE__{
-      id: generate_id(),
+      id: Keyword.get(opts, :id) || generate_id(),
       queue: queue,
       worker: worker,
       args: args,

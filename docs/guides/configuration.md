@@ -21,6 +21,7 @@ config :kathikon,
   prune_interval: 60_000,
   retention_period: :timer.hours(24 * 7),
   max_attempts: 20,
+  insert_many_chunk_size: 500,
   timezone: "Etc/UTC",
   mnesia_copies: :auto,
   storage_backend: Kathikon.Storage.Mnesia,
@@ -39,6 +40,7 @@ config :kathikon,
 | `:prune_interval` | `60000` | Pruner tick period (ms) |
 | `:retention_period` | `604800000` (7 days) | How long to keep terminal jobs (ms) |
 | `:max_attempts` | `20` | Default retry limit for new jobs |
+| `:insert_many_chunk_size` | `500` | Jobs per `insert_many/2` storage transaction |
 | `:timezone` | `"Etc/UTC"` | IANA zone for cron and naive `schedule_at` |
 | `:mnesia_copies` | `:auto` | Mnesia table storage — `:ram`, `:disc`, or `:auto` |
 | `:storage_backend` | `Kathikon.Storage.Mnesia` | Storage behaviour implementation |

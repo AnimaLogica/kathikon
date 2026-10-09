@@ -4,7 +4,7 @@
 Mix.install(
   [
     # {:kathikon, path: Path.expand("..", __DIR__), env: :prod},
-    {:kathikon, "~> 0.3.0"},
+    {:kathikon, "~> 0.4"},
     {:kino, "~> 0.19.0"},
     {:kino_vega_lite, "~> 0.1.11"},
     {:tzdata, "~> 1.2"}
@@ -29,7 +29,7 @@ Mix.install(
 
 ## Intro
 
-**Kathikon v0.3.0** is a BEAM-native durable job queue. Jobs live in Mnesia and run through explicit states: `scheduled → available → claimed → running → completed | retryable | dead | cancelled`. This notebook uses the local repo, not a Hex pin.
+**Kathikon** is a BEAM-native durable job queue. Jobs live in Mnesia and run through explicit states: `scheduled → available → claimed → running → completed | retryable | dead | cancelled`. This notebook uses the local repo, not a Hex pin.
 
 Run the setup cells top-to-bottom, then try each demo section.
 
@@ -180,6 +180,22 @@ defmodule Demo.ThumbnailWorker do
 end
 ```
 
+### ImportRowWorker
+
+Fast worker for bulk enqueue. No sleep, so a chunk of rows finishes quickly.
+
+```elixir
+defmodule Demo.ImportRowWorker do
+  use Kathikon.Worker
+
+  @impl true
+  def perform(%{args: %{"row" => row}}) do
+    Demo.Log.append("Imported row #{row}")
+    :ok
+  end
+end
+```
+
 ### FlashSaleWorker
 
 ```elixir
@@ -269,6 +285,7 @@ end
 | Dead letter       | `AlwaysFailWorker`   | `max_attempts`      |
 | Cancel newsletter | `SendEmailWorker`    | `cancel/1`          |
 | Thumbnails        | `ThumbnailWorker`    | concurrency         |
+| Bulk import       | `ImportRowWorker`    | `insert_many/2`     |
 
 ---
 
@@ -427,7 +444,38 @@ Process.sleep(2_500)
 Demo.Log.entries()
 ```
 
-## 10. Pruning
+## 10. Bulk enqueue
+
+`insert_many/2` writes many independent jobs in chunks of 500 by default. This cell uses `chunk_size: 10` so the chunking is visible on a small list. The queue is paused during the write, then resumed.
+
+No `:inserted` history row is written unless you pass `history: true`. The job record still has `inserted_at`. Claim and completion still append history when those transitions happen.
+
+```elixir
+:ok = Kathikon.pause_queue(:default)
+Demo.Log.clear()
+
+specs = Enum.map(1..40, &{Demo.ImportRowWorker, %{"row" => &1}})
+
+{microseconds, {:ok, result}} =
+  :timer.tc(fn -> Kathikon.insert_many(specs, chunk_size: 10) end)
+
+{:ok, events} = Kathikon.history(hd(result.ids))
+:ok = Kathikon.resume_queue(:default)
+
+%{
+  inserted: result.inserted,
+  errors: result.errors,
+  write_ms: Float.round(microseconds / 1_000, 1),
+  inserted_history_events: length(events)
+}
+```
+
+```elixir
+Process.sleep(2_000)
+{length(Demo.Log.entries()), Demo.Log.entries()}
+```
+
+## 11. Pruning
 
 Terminal jobs are removed after `retention_period` (3s here).
 
@@ -440,7 +488,7 @@ Process.sleep(6_000)
 Kathikon.fetch(job.id)
 ```
 
-## 11. Inspect jobs
+## 12. Inspect jobs
 
 ```elixir
 Demo.job_table(Kathikon.all())

@@ -84,7 +84,7 @@ Application code should use `Kathikon.insert/3` rather than calling `Storage` di
 config :kathikon, storage_backend: Kathikon.Storage.Mnesia
 ```
 
-The behaviour is `Kathikon.Storage`. v0.3.0 still ships one implementation (`Kathikon.Storage.Mnesia`). Planned backends: Ecto in v0.5.0, MongoDB in v0.6.0, and SQS in v0.7.0.
+The behaviour is `Kathikon.Storage`. v0.4.0 still ships one implementation (`Kathikon.Storage.Mnesia`), including chunked `insert_jobs/2`. Planned backends: Ecto in v0.6.0, MongoDB in v0.7.0, and SQS in v0.8.0. Those backends should implement `insert_jobs/2` with `insert_all`, bulk write, or `SendMessageBatch`.
 
 ## Tables
 
