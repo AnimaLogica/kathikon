@@ -4,7 +4,7 @@
 Mix.install(
   [
     # {:kathikon, path: Path.join(__DIR__, "..")},
-    {:kathikon, "~> 0.4"},
+    {:kathikon, "~> 0.4.0"},
     {:phoenix_playground, "~> 0.1.9"},
     {:phoenix_live_dashboard, "~> 0.8"}
   ],

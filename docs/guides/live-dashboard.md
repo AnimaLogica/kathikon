@@ -13,7 +13,7 @@ In the Phoenix app:
 ```elixir
 def deps do
   [
-    {:kathikon, "~> 0.3.0"},
+    {:kathikon, "~> 0.4.0"},
     {:phoenix_live_dashboard, "~> 0.8"}
   ]
 end

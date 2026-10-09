@@ -66,7 +66,7 @@ defmodule Kathikon.MixProject do
   defp package do
     [
       name: "kathikon",
-      files: ~w(lib .formatter.exs mix.exs README.md LICENSE CHANGELOG.md),
+      files: ~w(lib docs livebooks .formatter.exs mix.exs README.md LICENSE CHANGELOG.md),
       licenses: ["MIT"],
       maintainers: ["Thanos Vassilakis"],
       links: %{"GitHub" => "https://github.com/thanos/kathikon"}
