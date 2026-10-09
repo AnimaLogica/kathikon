@@ -2,9 +2,9 @@
 
 Kathikon (καθήκον — duty, obligation) is a BEAM-native durable job queue for Elixir. Jobs are persisted in Mnesia, executed by OTP supervisors and dispatchers, and tracked through an explicit state machine.
 
-**Current release:** v0.3.0 — LiveDashboard page (`Kathikon.LiveDashboard.Page`)
+**Current release:** v0.4.0 — bulk job submission (`Kathikon.insert_many/2`, `Batch.open/2` / `append/2` / `close/1`)
 
-Previous: **v0.2.1** — operations tooling (`Kathikon.Dashboard`, `mix kathikon.ops`). **v0.2.0** — control, scheduling, batches, and correctness.
+Previous: **v0.3.0** — LiveDashboard page (`Kathikon.LiveDashboard.Page`). **v0.2.1** — operations tooling (`Kathikon.Dashboard`, `mix kathikon.ops`). **v0.2.0** — control, scheduling, batches, and correctness.
 
 ## Guides
 
@@ -21,6 +21,7 @@ Previous: **v0.2.1** — operations tooling (`Kathikon.Dashboard`, `mix kathikon
 | [Storage & embedding](guides/storage-and-embedding.md) | Mnesia setup, Livebook, tests, backends |
 | [Job lifecycle](job_lifecycle.md) | State machine and history events |
 | [Batches](batches.md) | Fan-out/fan-in parent/child workflows |
+| [Bulk enqueue](guides/bulk-enqueue.md) | `insert_many/2` and streaming batch append |
 | [Management API](management_api.md) | Claim, retry, dead-letter, queue control, ops CLI |
 | [LiveDashboard](guides/live-dashboard.md) | Add the Kathikon tab to a Phoenix LiveDashboard |
 | [Dashboard spec](dashboard_spec.md) | Operator UI layout, state tabs, and API mapping |
@@ -48,6 +49,8 @@ Runnable scripts in `examples/` at the project root — run with `mix run exampl
 | `examples/scheduled_job.exs` | `schedule` with `:at` / `:in` |
 | `examples/dead_letter_retry.exs` | Failures, dead letter, rerun |
 | `examples/batch_fanout_fanin.exs` | Parent/child batches |
+| `examples/bulk_enqueue.exs` | Independent `insert_many/2` |
+| `examples/benchmark_bulk_enqueue.exs` | `insert/3` versus chunked `insert_many/2` |
 | `examples/reporting.exs` | `Kathikon.Report` summaries |
 | `examples/live_dashboard_ops.exs` | Playground control panel and LiveDashboard |
 | `examples/quantum_scheduler_adapter.exs` | Optional Quantum scheduler |
@@ -64,4 +67,4 @@ Kathikon.Supervisor
 └── Kathikon.Pruner         (deletes terminal jobs after retention)
 ```
 
-Public API: `Kathikon.insert/3`, `Kathikon.schedule/3`, `Kathikon.cancel/1`, `Kathikon.fetch/1`, `Kathikon.status/1`, `Kathikon.history/1`, `Kathikon.all/0`, `Kathikon.start_queue/1`, `Kathikon.claim/2`, `Kathikon.retry/2`, `Kathikon.dead_jobs/1`, `Kathikon.Dashboard.*`, `mix kathikon.ops`.
+Public API: `Kathikon.insert/3`, `Kathikon.insert_many/2`, `Kathikon.schedule/3`, `Kathikon.cancel/1`, `Kathikon.fetch/1`, `Kathikon.status/1`, `Kathikon.history/1`, `Kathikon.all/0`, `Kathikon.start_queue/1`, `Kathikon.claim/2`, `Kathikon.retry/2`, `Kathikon.dead_jobs/1`, `Kathikon.Batch.open/2`, `Kathikon.Dashboard.*`, `mix kathikon.ops`.

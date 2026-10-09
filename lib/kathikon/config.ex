@@ -13,6 +13,7 @@ defmodule Kathikon.Config do
         prune_interval: 60_000,
         retention_period: :timer.hours(24 * 7),
         max_attempts: 20,
+        insert_many_chunk_size: 500,
         mnesia_copies: :auto
 
   ## Reading at runtime
@@ -31,6 +32,7 @@ defmodule Kathikon.Config do
   @default_retention_period :timer.hours(24 * 7)
   @default_max_attempts 20
   @default_timezone "Etc/UTC"
+  @default_insert_many_chunk_size 500
 
   def queues, do: get(:queues, @default_queues)
 
@@ -55,6 +57,21 @@ defmodule Kathikon.Config do
   def retention_period, do: get(:retention_period, @default_retention_period)
 
   def max_attempts, do: get(:max_attempts, @default_max_attempts)
+
+  @doc """
+  Default number of jobs written in one `insert_many/2` storage transaction.
+
+  ## Examples
+
+      Kathikon.Config.insert_many_chunk_size()
+      #=> 500
+  """
+  def insert_many_chunk_size do
+    case get(:insert_many_chunk_size, @default_insert_many_chunk_size) do
+      size when is_integer(size) and size > 0 -> size
+      other -> raise ArgumentError, "invalid :insert_many_chunk_size #{inspect(other)}"
+    end
+  end
 
   @doc """
   IANA timezone for cron matching and naive `schedule_at` values.

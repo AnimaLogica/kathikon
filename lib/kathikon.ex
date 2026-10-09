@@ -16,7 +16,7 @@ defmodule Kathikon do
   See the [README](readme.html) and `docs/` guides for v0.2.0+ features:
   atomic claiming, job history, dead-letter queue, scheduling, batches,
   management APIs, reporting, v0.2.1 operations tooling (`Kathikon.Dashboard`,
-  `mix kathikon.ops`), and the v0.3.0 LiveDashboard page
+  `mix kathikon.ops`), bulk enqueue (`insert_many/2`), and the LiveDashboard page
   (`Kathikon.LiveDashboard.Page`).
   """
 
@@ -57,6 +57,43 @@ defmodule Kathikon do
       Telemetry.event([:job, :inserted], %{}, metadata(job, worker: worker))
       {:ok, job}
     end
+  end
+
+  @doc """
+  Enqueues many independent jobs in storage chunks.
+
+  Specs are `{worker, args}`, `{worker, args, opts}`, or a map with `:worker`,
+  `:args`, and the same options as `insert/3` (`:queue`, `:priority`, `:id`, …).
+
+  Returns partial success. `errors` are `{index, reason}` into the input.
+  `:on_error` is `:continue` (default) or `:abort` (roll back the current chunk
+  and stop). `:history` defaults to `false` (no `:inserted` row). Pass
+  `history: true` to record one. `:telemetry` defaults to one
+  `[:kathikon, :job, :inserted_many]` event per chunk; `:per_job` also emits
+  `[:kathikon, :job, :inserted]`.
+
+  Each distinct queue is started once, not once per job.
+
+  ## Examples
+
+      {:ok, %{inserted: 2, ids: ids, errors: []}} =
+        Kathikon.insert_many([
+          {MyApp.EmailWorker, %{"n" => 1}},
+          {MyApp.EmailWorker, %{"n" => 2}, [priority: 5, queue: :emails]}
+        ], chunk_size: 500)
+
+  See `docs/guides/bulk-enqueue.md`.
+  """
+  @spec insert_many(Enumerable.t(), keyword()) ::
+          {:ok,
+           %{
+             inserted: non_neg_integer(),
+             ids: [String.t()],
+             errors: [{non_neg_integer(), term()}]
+           }}
+          | {:error, term()}
+  def insert_many(specs, opts \\ []) do
+    Kathikon.InsertMany.run(specs, opts)
   end
 
   @doc """

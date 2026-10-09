@@ -2,20 +2,18 @@ defmodule Kathikon.Batch do
   @moduledoc """
   Simple parent/child batch workflows for fan-out/fan-in.
 
-  The parent job moves to `:waiting_for_children` without blocking a BEAM process.
-  When the batch completes, an explicit continuation job is enqueued.
+  `start/3` is the small case: it opens a batch, appends every child, and closes.
+  A crawler that discovers links while it runs should stream them:
 
-  ## Examples
+      {:ok, batch} = Kathikon.Batch.open(parent.id, on_complete: {ReduceWorker, %{}})
+      {:ok, _} = Kathikon.Batch.append(batch.batch_id, link_specs)
+      :ok = Kathikon.Batch.close(batch.batch_id)
 
-      {:ok, parent} = Kathikon.Storage.insert(parent_job)
-
-      {:ok, batch} =
-        Kathikon.Batch.start(parent.id, [
-          {ChildWorker, %{"id" => 1}, [queue: :default]},
-          {ChildWorker, %{"id" => 2}, [queue: :default]}
-        ], on_complete: {ReportWorker, %{"parent_id" => parent.id}})
-
-      {:ok, %{status: :running}} = Kathikon.Batch.status(batch.batch_id)
+  `open/2` leaves the parent `:running` and the batch `:loading`. `append/2`
+  writes children through `Kathikon.Storage.insert_jobs/2`. `close/1` is the seal:
+  the parent moves to `:waiting_for_children` and the continuation waits until
+  finished children equal the sealed count. Append after close returns
+  `{:error, :closed}`.
 
   See `docs/batches.md`.
   """
@@ -43,51 +41,119 @@ defmodule Kathikon.Batch do
   """
   @spec start(String.t(), [child_spec()], keyword()) :: {:ok, map()} | {:error, term()}
   def start(parent_job_id, child_specs, opts \\ []) when is_list(child_specs) do
+    append_opts = Keyword.put_new(opts, :on_error, :abort)
+
+    with {:ok, opened} <- open(parent_job_id, opts),
+         {:ok, result} <- append(opened.batch_id, child_specs, append_opts),
+         :ok <- require_clean_append(result),
+         :ok <- close(opened.batch_id) do
+      status(opened.batch_id)
+    end
+  end
+
+  @doc """
+  Opens a batch for a running parent and leaves that parent `:running`.
+
+  Children are added with `append/2`. The parent waits only after `close/1`.
+
+  ## Options
+
+    * `:on_complete` — `{WorkerModule, args}` continuation when the batch succeeds
+    * `:success_policy` — `:all_succeeded` (default), `{:at_least, n}`, or `:allow_partial`
+    * `:queue` — default queue for child jobs
+
+  ## Examples
+
+      {:ok, batch} =
+        Kathikon.Batch.open(parent.id, on_complete: {ReduceWorker, %{}})
+  """
+  @spec open(String.t(), keyword()) :: {:ok, map()} | {:error, term()}
+  def open(parent_job_id, opts \\ []) when is_binary(parent_job_id) and is_list(opts) do
     with {:ok, parent} <- Storage.fetch(parent_job_id) do
-      batch_id = generate_id()
-      queue = Keyword.get(opts, :queue, parent.queue)
-      success_policy = Keyword.get(opts, :success_policy, :all_succeeded)
-      on_complete = Keyword.get(opts, :on_complete)
       now = DateTime.utc_now()
 
-      child_jobs =
-        Enum.map(child_specs, fn spec ->
-          {worker, args, child_opts} = normalize_spec(spec, queue)
-
-          Job.build(
-            worker,
-            args,
-            Keyword.merge(child_opts, parent_job_id: parent_job_id, batch_id: batch_id)
-          )
-        end)
-
-      for job <- child_jobs, do: :ok = Kathikon.Queue.ensure_started(job.queue)
-
       batch_attrs = %{
-        batch_id: batch_id,
-        status: :running,
+        batch_id: generate_id(),
+        status: :loading,
         success_count: 0,
         failure_count: 0,
         cancelled_count: 0,
-        success_policy: success_policy,
-        on_complete: on_complete,
+        success_policy: Keyword.get(opts, :success_policy, :all_succeeded),
+        on_complete: Keyword.get(opts, :on_complete),
         created_at: now,
         completed_at: nil,
-        metadata: %{}
+        metadata: %{},
+        queue: Keyword.get(opts, :queue, parent.queue),
+        parent_job_id: parent_job_id,
+        child_job_ids: [],
+        pending_count: 0,
+        expected_count: 0
       }
 
-      case Storage.start_batch(parent_job_id, child_jobs, batch_attrs) do
-        {:ok, batch} ->
-          Telemetry.event([:batch, :started], %{children: length(batch.child_job_ids)}, %{
-            batch_id: batch_id,
-            parent_job_id: parent_job_id
-          })
+      Storage.open_batch(parent_job_id, batch_attrs)
+    end
+  end
 
-          {:ok, batch}
+  @doc """
+  Appends child jobs to a `:loading` batch.
 
-        other ->
-          other
+  Only committed rows increase `expected_count`. A failed chunk leaves the parent
+  `:running` so the caller can append the failed slice again or `close/1`.
+
+  ## Examples
+
+      {:ok, %{inserted: 2}} =
+        Kathikon.Batch.append(batch_id, [
+          {FetchWorker, %{"url" => "https://example.com/a"}},
+          {FetchWorker, %{"url" => "https://example.com/b"}}
+        ])
+  """
+  @spec append(String.t(), [child_spec()], keyword()) ::
+          {:ok,
+           %{
+             inserted: non_neg_integer(),
+             ids: [String.t()],
+             errors: [{non_neg_integer(), term()}]
+           }}
+          | {:error, term()}
+  def append(batch_id, child_specs, opts \\ []) when is_list(child_specs) and is_list(opts) do
+    with {:ok, batch} <- status(batch_id) do
+      if batch.status == :loading do
+        append_loading(batch, child_specs, opts)
+      else
+        {:error, :closed}
       end
+    end
+  end
+
+  @doc """
+  Seals a batch. The parent moves to `:waiting_for_children`.
+
+  Further `append/2` calls fail. The continuation runs only after finished
+  children equal the sealed `expected_count`.
+
+  ## Examples
+
+      :ok = Kathikon.Batch.close(batch_id)
+  """
+  @spec close(String.t()) :: :ok | {:error, term()}
+  def close(batch_id) when is_binary(batch_id) do
+    case Storage.close_batch(batch_id) do
+      {:ok, :pending, batch} ->
+        emit_started(batch)
+        :ok
+
+      {:ok, :complete, batch, parent} ->
+        emit_started(batch)
+        complete_batch(batch, parent)
+        :ok
+
+      {:ok, :fail, batch, parent} ->
+        emit_started(batch)
+        :ok = fail_batch(batch, parent)
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
@@ -188,6 +254,60 @@ defmodule Kathikon.Batch do
     end
   end
 
+  defp append_loading(batch, child_specs, opts) do
+    jobs =
+      Enum.map(child_specs, fn spec ->
+        {worker, args, child_opts} = normalize_spec(spec, batch.queue)
+
+        Job.build(
+          worker,
+          args,
+          Keyword.merge(child_opts, parent_job_id: batch.parent_job_id, batch_id: batch.batch_id)
+        )
+      end)
+
+    storage_opts =
+      opts
+      |> Keyword.take([:chunk_size, :history, :on_error])
+      |> Keyword.put(:batch_id, batch.batch_id)
+
+    with :ok <- ensure_queues(jobs),
+         {:ok, result} <- Storage.insert_jobs(jobs, storage_opts) do
+      _ = record_appended_fallback(batch.batch_id, result.ids)
+      {:ok, %{inserted: length(result.ids), ids: result.ids, errors: result.errors}}
+    end
+  end
+
+  defp record_appended_fallback(_batch_id, []), do: :ok
+
+  defp record_appended_fallback(batch_id, ids) do
+    if function_exported?(Storage.backend(), :insert_jobs, 2) do
+      :ok
+    else
+      {:ok, _} = Storage.record_batch_appended(batch_id, ids)
+      :ok
+    end
+  end
+
+  defp ensure_queues(jobs) do
+    jobs
+    |> Enum.map(& &1.queue)
+    |> Enum.uniq()
+    |> Enum.each(fn queue -> :ok = Kathikon.Queue.ensure_started(queue) end)
+
+    :ok
+  end
+
+  defp require_clean_append(%{errors: []}), do: :ok
+  defp require_clean_append(%{errors: errors}), do: {:error, errors}
+
+  defp emit_started(batch) do
+    Telemetry.event([:batch, :started], %{children: length(batch.child_job_ids)}, %{
+      batch_id: batch.batch_id,
+      parent_job_id: batch.parent_job_id
+    })
+  end
+
   defp complete_batch(batch, parent) do
     now = DateTime.utc_now()
 
@@ -227,6 +347,7 @@ defmodule Kathikon.Batch do
 
     failed_batch = %{batch | status: :failed, completed_at: DateTime.utc_now()}
     {:ok, _} = Storage.write_batch(failed_batch)
+    :ok
   end
 
   defp enqueue_continuation(%{on_complete: {worker, args}}) when is_atom(worker) do

@@ -666,6 +666,152 @@ defmodule Kathikon.Storage.Mnesia do
   end
 
   @doc """
+  Inserts many jobs, one transaction per chunk.
+
+  Pass `batch_id:` to attach successful ids to a `:loading` batch in the same
+  transaction as the writes. History is skipped unless `history: true`.
+  `on_error: :abort` rolls back the current chunk and returns `{:error, reason}`.
+  """
+  @spec insert_jobs([Job.t()], keyword()) ::
+          {:ok, %{ids: [String.t()], errors: [{non_neg_integer(), term()}]}}
+          | {:error, term()}
+  @impl true
+  def insert_jobs(jobs, opts \\ []) when is_list(jobs) and is_list(opts) do
+    with {:ok, chunk_size} <- fetch_chunk_size(opts) do
+      write_job_chunks(jobs, chunk_size, opts)
+    end
+  end
+
+  defp write_job_chunks(jobs, chunk_size, opts) do
+    history = history_mode(opts)
+    on_error = Keyword.get(opts, :on_error, :continue)
+
+    jobs
+    |> Enum.chunk_every(chunk_size)
+    |> Enum.reduce_while({0, [], []}, fn chunk, acc ->
+      reduce_job_chunk(chunk, acc, history, on_error, opts)
+    end)
+    |> summarize_job_chunks()
+  end
+
+  defp reduce_job_chunk(chunk, {offset, ids, errors}, history, on_error, opts) do
+    case insert_jobs_chunk(chunk, offset, history, on_error, opts) do
+      {:ok, %{ids: chunk_ids, errors: chunk_errors}} ->
+        {:cont, {offset + length(chunk), ids ++ chunk_ids, errors ++ chunk_errors}}
+
+      {:error, reason} ->
+        {:halt, {:error, reason}}
+    end
+  end
+
+  defp summarize_job_chunks({:error, reason}), do: {:error, reason}
+
+  defp summarize_job_chunks({_offset, ids, errors}) do
+    {:ok, %{ids: ids, errors: errors}}
+  end
+
+  @doc """
+  Writes a `:loading` batch and leaves the parent job `:running`.
+  """
+  @spec open_batch(String.t(), map()) :: {:ok, map()} | {:error, term()}
+  def open_batch(parent_job_id, batch_attrs) when is_map(batch_attrs) do
+    transaction(fn ->
+      parent = fetch_job!(parent_job_id)
+
+      unless parent.state == :running do
+        abort({:invalid_state, parent.state})
+      end
+
+      batch_id = Map.fetch!(batch_attrs, :batch_id)
+
+      batch =
+        Map.merge(
+          %{
+            parent_job_id: parent_job_id,
+            child_job_ids: [],
+            pending_count: 0,
+            expected_count: 0,
+            status: :loading
+          },
+          batch_attrs
+        )
+
+      :mnesia.write({@batches, batch_id, :erlang.term_to_binary(batch)})
+      batch
+    end)
+    |> normalize_transaction()
+  end
+
+  @doc """
+  Seals a `:loading` batch. The parent moves to `:waiting_for_children`.
+
+  Returns a completion intent when `pending_count` is already zero.
+  """
+  @spec close_batch(String.t()) ::
+          {:ok, :pending, map()}
+          | {:ok, :complete, map(), Job.t()}
+          | {:ok, :fail, map(), Job.t()}
+          | {:error, term()}
+  def close_batch(batch_id) do
+    transaction(fn ->
+      batch = fetch_batch!(batch_id)
+
+      unless batch.status == :loading do
+        abort(:closed)
+      end
+
+      parent = fetch_job!(batch.parent_job_id)
+
+      unless parent.state == :running do
+        abort({:invalid_state, parent.state})
+      end
+
+      parent =
+        parent
+        |> Map.merge(%{state: :waiting_for_children, batch_id: batch.batch_id})
+        |> Job.normalize()
+
+      :ok = transition!(:running, :waiting_for_children)
+
+      child_count = Map.get(batch, :expected_count, length(batch.child_job_ids))
+
+      _ =
+        commit_job_with_history!(
+          parent,
+          parent.id,
+          :batch_started,
+          :running,
+          :waiting_for_children,
+          %{batch_id: batch.batch_id, child_count: child_count}
+        )
+
+      batch = %{batch | status: :running}
+      :mnesia.write({@batches, batch.batch_id, :erlang.term_to_binary(batch)})
+
+      cond do
+        batch.pending_count > 0 ->
+          {:pending, batch}
+
+        batch_succeeded?(batch) ->
+          {:complete, batch, parent}
+
+        true ->
+          {:fail, batch, parent}
+      end
+    end)
+    |> normalize_batch_child_transaction()
+  end
+
+  @doc false
+  @spec record_batch_appended(String.t(), [String.t()]) :: {:ok, map()} | {:error, term()}
+  def record_batch_appended(batch_id, ids) when is_list(ids) do
+    transaction(fn ->
+      append_ids_to_batch!(batch_id, ids)
+    end)
+    |> normalize_transaction()
+  end
+
+  @doc """
   Atomically transitions a parent to `:waiting_for_children`, inserts child jobs,
   and writes the batch record.
   """
@@ -739,7 +885,7 @@ defmodule Kathikon.Storage.Mnesia do
     transaction(fn ->
       batch = fetch_batch!(batch_id)
 
-      if batch.status != :running or batch.pending_count <= 0 do
+      if batch.pending_count <= 0 or batch.status not in [:loading, :running] do
         abort(:already_finished)
       end
 
@@ -749,7 +895,7 @@ defmodule Kathikon.Storage.Mnesia do
       :mnesia.write({@batches, batch.batch_id, :erlang.term_to_binary(batch)})
 
       cond do
-        batch.pending_count > 0 ->
+        batch.status == :loading or batch.pending_count > 0 ->
           {:pending, batch}
 
         batch_succeeded?(batch) ->
@@ -806,6 +952,96 @@ defmodule Kathikon.Storage.Mnesia do
       |> Enum.map(&decode_term/1)
     end)
     |> elem(1)
+  end
+
+  defp insert_jobs_chunk(chunk, offset, history, on_error, opts) do
+    batch_id = Keyword.get(opts, :batch_id)
+
+    transaction(fn ->
+      {ids, errors} =
+        chunk
+        |> Enum.with_index()
+        |> Enum.reduce({[], []}, fn {job, index}, acc ->
+          place_chunk_job(job, index, offset, history, on_error, acc)
+        end)
+
+      ids = Enum.reverse(ids)
+      _ = if batch_id && ids != [], do: append_ids_to_batch!(batch_id, ids)
+      %{ids: ids, errors: Enum.reverse(errors)}
+    end)
+    |> normalize_transaction()
+  end
+
+  defp place_chunk_job(job, index, offset, history, on_error, {ids, errors}) do
+    case read_job(job.id) do
+      nil ->
+        _ = persist_new_job!(job, history)
+        {[job.id | ids], errors}
+
+      _existing when on_error == :abort ->
+        abort({:already_exists, job.id})
+
+      _existing ->
+        {ids, [{offset + index, {:already_exists, job.id}} | errors]}
+    end
+  end
+
+  defp append_ids_to_batch!(batch_id, ids) do
+    batch = fetch_batch!(batch_id)
+
+    unless batch.status == :loading do
+      abort(:closed)
+    end
+
+    count = length(ids)
+
+    batch = %{
+      batch
+      | child_job_ids: batch.child_job_ids ++ ids,
+        pending_count: batch.pending_count + count,
+        expected_count: Map.get(batch, :expected_count, 0) + count
+    }
+
+    :mnesia.write({@batches, batch.batch_id, :erlang.term_to_binary(batch)})
+    batch
+  end
+
+  defp persist_new_job!(job, :none) do
+    _ = write_job(Job.normalize(job))
+    job.id
+  end
+
+  defp persist_new_job!(job, :record) do
+    job = Job.normalize(job)
+
+    _ =
+      commit_job_with_history!(job, job.id, :inserted, nil, job.state, %{
+        queue: job.queue
+      })
+
+    if job.batch_id do
+      _ =
+        write_history_event(job.id, :child_created, nil, job.state, %{
+          parent_job_id: job.parent_job_id,
+          batch_id: job.batch_id
+        })
+    end
+
+    job.id
+  end
+
+  defp fetch_chunk_size(opts) do
+    case Keyword.get(opts, :chunk_size, Kathikon.Config.insert_many_chunk_size()) do
+      size when is_integer(size) and size > 0 -> {:ok, size}
+      other -> {:error, {:invalid_chunk_size, other}}
+    end
+  end
+
+  defp history_mode(opts) do
+    case Keyword.get(opts, :history, false) do
+      true -> :record
+      _ -> :none
+    end
   end
 
   defp insert_batch_child!(job, parent_job_id, batch_id) do

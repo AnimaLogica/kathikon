@@ -1,7 +1,7 @@
 defmodule Kathikon.MixProject do
   use Mix.Project
 
-  @version "0.3.0"
+  @version "0.4.0"
 
   def project do
     [
@@ -115,6 +115,7 @@ defmodule Kathikon.MixProject do
       "docs/guides/storage-and-embedding.md",
       "docs/job_lifecycle.md",
       "docs/batches.md",
+      "docs/guides/bulk-enqueue.md",
       "docs/management_api.md",
       "docs/guides/live-dashboard.md",
       "docs/dashboard_spec.md",

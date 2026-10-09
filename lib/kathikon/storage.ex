@@ -71,6 +71,10 @@ defmodule Kathikon.Storage do
 
   @callback start_job(Job.t(), map(), DateTime.t()) :: {:ok, Job.t()} | {:error, term()}
 
+  @callback insert_jobs([Job.t()], keyword()) ::
+              {:ok, %{ids: [String.t()], errors: [{non_neg_integer(), term()}]}}
+              | {:error, term()}
+
   @optional_callbacks [
     start_job: 3,
     claim_and_start_available_jobs: 3,
@@ -83,7 +87,8 @@ defmodule Kathikon.Storage do
     prunable_jobs: 1,
     delete: 1,
     all: 0,
-    list_jobs_page: 1
+    list_jobs_page: 1,
+    insert_jobs: 2
   ]
 
   @doc """
@@ -154,6 +159,36 @@ defmodule Kathikon.Storage do
   @doc false
   def insert(job), do: backend_module().insert(job)
 
+  @doc """
+  Inserts many jobs through the storage backend.
+
+  Backends can implement the optional `insert_jobs/2` callback. When a backend
+  does not, each job is written on its own.
+
+  ## Options
+
+    * `:chunk_size` — jobs per storage transaction
+    * `:history` — `false` (default) skips the `:inserted` row; `true` records it
+    * `:on_error` — `:continue` (default) or `:abort`
+
+  ## Examples
+
+      {:ok, %{ids: ids, errors: []}} =
+        Kathikon.Storage.insert_jobs(jobs, chunk_size: 500)
+  """
+  @spec insert_jobs([Job.t()], keyword()) ::
+          {:ok, %{ids: [String.t()], errors: [{non_neg_integer(), term()}]}}
+          | {:error, term()}
+  def insert_jobs(jobs, opts \\ []) when is_list(jobs) and is_list(opts) do
+    mod = backend_module()
+
+    if function_exported?(mod, :insert_jobs, 2) do
+      mod.insert_jobs(jobs, opts)
+    else
+      insert_jobs_fallback(jobs, opts)
+    end
+  end
+
   @doc false
   def update(job), do: backend_module().update(job)
 
@@ -210,6 +245,17 @@ defmodule Kathikon.Storage do
     do: backend_module().start_batch(parent_id, child_jobs, batch_attrs)
 
   @doc false
+  def open_batch(parent_id, batch_attrs),
+    do: backend_module().open_batch(parent_id, batch_attrs)
+
+  @doc false
+  def close_batch(batch_id), do: backend_module().close_batch(batch_id)
+
+  @doc false
+  def record_batch_appended(batch_id, ids),
+    do: backend_module().record_batch_appended(batch_id, ids)
+
+  @doc false
   def record_batch_child_finished(child_job),
     do: backend_module().record_batch_child_finished(child_job)
 
@@ -255,6 +301,32 @@ defmodule Kathikon.Storage do
 
   @doc false
   def list_dead_jobs(opts \\ []), do: backend_module().list_dead_jobs(opts)
+
+  defp insert_jobs_fallback(jobs, opts) do
+    on_error = Keyword.get(opts, :on_error, :continue)
+
+    jobs
+    |> Enum.with_index()
+    |> Enum.reduce_while({[], []}, fn {job, index}, {ids, errors} ->
+      case insert(job) do
+        {:ok, saved} ->
+          {:cont, {[saved.id | ids], errors}}
+
+        {:error, reason} when on_error == :abort ->
+          {:halt, {:error, reason}}
+
+        {:error, reason} ->
+          {:cont, {ids, [{index, reason} | errors]}}
+      end
+    end)
+    |> case do
+      {:error, reason} ->
+        {:error, reason}
+
+      {ids, errors} ->
+        {:ok, %{ids: Enum.reverse(ids), errors: Enum.reverse(errors)}}
+    end
+  end
 
   defp list_jobs_page_fallback(opts) do
     queue = Keyword.get(opts, :queue)
