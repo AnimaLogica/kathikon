@@ -402,29 +402,10 @@ defmodule Kathikon.Dashboard.RPCTest do
 
   alias Kathikon.Dashboard.RPC
 
-  @rpc_node :"kathikon_rpc@127.0.0.1"
-  @rpc_cookie :kathikon_rpc_test_cookie
-
-  setup context do
-    if Map.get(context, :rpc_node) do
-      case maybe_start_rpc_node() do
-        :unavailable ->
-          {:ok, skip: "Cannot start distributed node for RPC tests"}
-
-        :ok ->
-          # Node.start/1 renames this VM. Restart Kathikon so Mnesia and the
-          # scheduler are not left blocked on the previous node name.
-          Kathikon.TestSupport.stop_runtime!()
-          Kathikon.TestSupport.ensure_runtime!()
-          Kathikon.Storage.setup()
-          Kathikon.Storage.clear_jobs!()
-          :ok
-      end
-    else
-      Kathikon.Storage.setup()
-      Kathikon.Storage.clear_jobs!()
-      :ok
-    end
+  setup do
+    Kathikon.Storage.setup()
+    Kathikon.Storage.clear_jobs!()
+    :ok
   end
 
   test "allowed? whitelists dashboard functions" do
@@ -434,22 +415,16 @@ defmodule Kathikon.Dashboard.RPCTest do
 
   test "call rejects non-whitelisted functions" do
     assert {:error, {:rpc_not_allowed, :evil}} =
-             RPC.call(@rpc_node, :evil, [])
+             RPC.call(:"kathikon_rpc@127.0.0.1", :evil, [])
   end
 
   test "call forwards dashboard result without double-wrapping" do
-    result = RPC.call(@rpc_node, :list_jobs, [[queue: :default, limit: 1]])
+    result = RPC.call(node(), :list_jobs, [[queue: :default, limit: 1]])
 
-    case result do
-      {:ok, page} ->
-        assert is_list(page.jobs)
-        assert is_integer(page.total)
-        refute match?({:ok, {:ok, _}}, result)
-
-      {:error, :nodedown} ->
-        assert {:error, :nodedown} =
-                 RPC.call(:"kathikon_unreachable@127.0.0.1", :queue_summary, [[]])
-    end
+    assert {:ok, page} = result
+    assert is_list(page.jobs)
+    assert is_integer(page.total)
+    refute match?({:ok, {:ok, _}}, result)
   end
 
   test "call returns nodedown for unreachable nodes" do
@@ -457,40 +432,10 @@ defmodule Kathikon.Dashboard.RPCTest do
              RPC.call(:"kathikon_unreachable@127.0.0.1", :queue_summary, [[]])
   end
 
-  @tag :rpc_node
   test "call returns badrpc when remote invocation fails" do
-    assert {:error, {:badrpc, _reason}} = RPC.call(@rpc_node, :fetch_job, [123])
-  end
-
-  defp maybe_start_rpc_node do
-    with :ok <- start_rpc_node(),
-         :ok <- set_rpc_cookie(),
-         :pong <- :net_adm.ping(@rpc_node) do
-      :ok
-    else
-      _ -> :unavailable
-    end
-  end
-
-  defp start_rpc_node do
-    case Node.start(@rpc_node) do
-      {:ok, _} ->
-        :ok
-
-      {:error, {:already_started, _}} when node() == @rpc_node ->
-        :ok
-
-      {:error, :already_started} when node() == @rpc_node ->
-        :ok
-
-      _ ->
-        :unavailable
-    end
-  end
-
-  defp set_rpc_cookie do
-    Node.set_cookie(@rpc_cookie)
-    :ok
+    # Local :rpc.call works without epmd / a named node; invalid args raise on the
+    # Dashboard MFA and come back as {:badrpc, {:EXIT, _}}.
+    assert {:error, {:badrpc, _reason}} = RPC.call(node(), :fetch_job, [123])
   end
 end
 
