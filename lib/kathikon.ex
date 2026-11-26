@@ -16,16 +16,18 @@ defmodule Kathikon do
   See the [README](readme.html) and `docs/` guides for v0.2.0+ features:
   atomic claiming, job history, dead-letter queue, scheduling, batches,
   management APIs, reporting, v0.2.1 operations tooling (`Kathikon.Dashboard`,
-  `mix kathikon.ops`), bulk enqueue (`insert_many/2`), and the LiveDashboard page
+  `mix kathikon.ops`), bulk enqueue (`insert_many/2`), job uniqueness
+  (`unique:` on workers / `insert/3`), and the LiveDashboard page
   (`Kathikon.LiveDashboard.Page`).
   """
 
-  alias Kathikon.{Job, Queue, QueueControl, Storage, Telemetry}
+  alias Kathikon.{Job, Queue, QueueControl, Storage, Telemetry, Unique}
 
   @doc """
   Inserts a job into the durable queue.
 
-  Starts the target queue dispatcher if needed. Emits `[:kathikon, :job, :inserted]`.
+  Starts the target queue dispatcher if needed. Emits `[:kathikon, :job, :inserted]`
+  when a new row is written (not when uniqueness coalesces to an existing job).
 
   ## Options
 
@@ -34,6 +36,12 @@ defmodule Kathikon do
     * `:max_attempts` — retry limit (default from config)
     * `:schedule_in` — seconds until the job becomes available
     * `:schedule_at` — `DateTime` or `NaiveDateTime` when the job becomes available
+    * `:unique` — uniqueness opts (`[period:, keys: [:args]]`) or `false` to disable.
+      Defaults to the worker's `use Kathikon.Worker, unique: ...` when set.
+      Use `by:` instead of `keys:` to hash whatever a function of the built
+      `%Kathikon.Job{}` returns. The function runs once, before storage. If it
+      raises, `insert/3` returns `{:error, {:unique_key_failed, reason}}`.
+      On conflict, returns `{:ok, existing_job}` unless `on_conflict: :error`.
 
   ## Examples
 
@@ -47,16 +55,41 @@ defmodule Kathikon do
         )
 
       {:ok, job} = Kathikon.insert(MyApp.DigestWorker, %{}, schedule_in: 3600)
+
+      {:ok, job} =
+        Kathikon.insert(MyApp.MediaWorker, %{"media_id" => 1},
+          unique: [period: 60, keys: [:args]]
+        )
+
+      # Unique on media_id only; other args are ignored
+      {:ok, job} =
+        Kathikon.insert(MyApp.MediaWorker, %{"media_id" => 1, "requested_at" => now},
+          unique: [period: 60, by: fn job -> job.args["media_id"] end]
+        )
   """
   @spec insert(module(), map(), keyword()) :: {:ok, Job.t()} | {:error, term()}
   def insert(worker, args, opts \\ []) when is_atom(worker) and is_map(args) do
-    with {:ok, opts} <- Kathikon.Timezone.normalize_opts(opts),
+    unique = Unique.resolve(worker, opts)
+
+    with {:ok, opts} <- Kathikon.Timezone.normalize_opts(Keyword.delete(opts, :unique)),
          job = Job.build(worker, args, opts),
+         {:ok, prepared} <- Unique.prepare(job, unique),
          :ok <- Queue.ensure_started(job.queue),
-         {:ok, job} <- Storage.insert(job) do
-      Telemetry.event([:job, :inserted], %{}, metadata(job, worker: worker))
-      {:ok, job}
+         {:ok, stored} <- storage_insert(job, prepared) do
+      maybe_emit_inserted(job, stored, worker)
+      {:ok, stored}
     end
+  end
+
+  defp storage_insert(job, false), do: Storage.insert(job)
+  defp storage_insert(job, unique), do: Storage.insert_unique(job, unique)
+
+  defp maybe_emit_inserted(built, stored, worker) do
+    if stored.id == built.id do
+      Telemetry.event([:job, :inserted], %{}, metadata(stored, worker: worker))
+    end
+
+    :ok
   end
 
   @doc """

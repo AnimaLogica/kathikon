@@ -2,7 +2,7 @@
 
 Kathikon (καθήκον — duty, obligation) is a BEAM-native durable job queue for Elixir. Jobs are persisted in Mnesia, executed by OTP supervisors and dispatchers, and tracked through an explicit state machine.
 
-**Current release:** v0.4.0 — bulk job submission (`Kathikon.insert_many/2`, `Batch.open/2` / `append/2` / `close/1`)
+**Current release:** v0.5.0 — job uniqueness (`use Kathikon.Worker, unique: ...`, `insert/3` `:unique`)
 
 Previous: **v0.3.0** — LiveDashboard page (`Kathikon.LiveDashboard.Page`). **v0.2.1** — operations tooling (`Kathikon.Dashboard`, `mix kathikon.ops`). **v0.2.0** — control, scheduling, batches, and correctness.
 

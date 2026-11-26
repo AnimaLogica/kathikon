@@ -1,6 +1,6 @@
 # Module reference
 
-Public API and runtime modules for Kathikon v0.4.0. For narrative guides see the [documentation index](../documentation.html) or [quick start](../guides/quick-start.html).
+Public API and runtime modules for Kathikon v0.5.0. For narrative guides see the [documentation index](../documentation.html) or [quick start](../guides/quick-start.html).
 
 ---
 
@@ -14,7 +14,7 @@ Main entry point. Enqueue, cancel, and inspect jobs.
 @spec insert(module(), map(), keyword()) :: {:ok, Job.t()} | {:error, term()}
 ```
 
-Enqueues a job. Starts the target queue dispatcher if needed. Emits `[:kathikon, :job, :inserted]`.
+Enqueues a job. Starts the target queue dispatcher if needed. Emits `[:kathikon, :job, :inserted]` when a new row is written (not when uniqueness coalesces).
 
 **Options**
 
@@ -25,6 +25,7 @@ Enqueues a job. Starts the target queue dispatcher if needed. Emits `[:kathikon,
 | `:max_attempts` | `Kathikon.Config.max_attempts()` | Retry limit |
 | `:schedule_in` | — | Seconds until available |
 | `:schedule_at` | — | `DateTime` when job becomes available |
+| `:unique` | worker default | `[period:, keys: [:args]]`, `[period:, by: fun]` or `false` |
 
 **Examples**
 
@@ -211,7 +212,7 @@ Kathikon.Job.backoff_seconds(2)  # 20
 
 ## Kathikon.Worker
 
-Behaviour for job workers.
+Behaviour for job workers. Optional `unique:` on `use` sets the default for `Kathikon.insert/3`.
 
 ### Callback
 
@@ -229,7 +230,7 @@ Behaviour for job workers.
 
 ```elixir
 defmodule MyApp.Workers.Webhook do
-  use Kathikon.Worker
+  use Kathikon.Worker, unique: [period: 60, keys: [:args]]
 
   @impl true
   def perform(%{args: %{"url" => url, "body" => body}}) do
@@ -240,6 +241,8 @@ defmodule MyApp.Workers.Webhook do
   end
 end
 ```
+
+See [Workers](../guides/workers.md#uniqueness) for uniqueness options.
 
 ---
 

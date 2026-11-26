@@ -6,6 +6,33 @@ defmodule Kathikon.Workers.SuccessWorker do
   def perform(_job), do: :ok
 end
 
+defmodule Kathikon.Workers.UniqueMediaWorker do
+  @moduledoc false
+  use Kathikon.Worker, unique: [period: 60, keys: [:args]]
+
+  @impl true
+  def perform(_job), do: :ok
+end
+
+defmodule Kathikon.Workers.UniqueByWorker do
+  @moduledoc false
+  use Kathikon.Worker, unique: [period: 60, by: &__MODULE__.unique_key/1]
+
+  @doc false
+  def unique_key(job), do: job.args["media_id"]
+
+  @impl true
+  def perform(_job), do: :ok
+end
+
+defmodule Kathikon.Workers.UniqueByOtherWorker do
+  @moduledoc false
+  use Kathikon.Worker, unique: [period: 60, by: {Kathikon.Workers.UniqueByWorker, :unique_key}]
+
+  @impl true
+  def perform(_job), do: :ok
+end
+
 defmodule Kathikon.Workers.FailWorker do
   @moduledoc false
   use Kathikon.Worker

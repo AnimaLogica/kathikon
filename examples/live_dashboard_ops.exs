@@ -1,5 +1,5 @@
 #!/usr/bin/env elixir
-# Demo: Kathikon v0.4.0 ops control panel + LiveDashboard via Phoenix Playground.
+# Demo: Kathikon v0.5.0 ops control panel + LiveDashboard via Phoenix Playground.
 #
 # From the repo root:
 #   iex examples/live_dashboard_ops.exs
