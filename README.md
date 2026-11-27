@@ -1,7 +1,7 @@
 # Kathikon
 
-[![CI](https://github.com/thanos/kathikon/actions/workflows/ci.yml/badge.svg)](https://github.com/thanos/kathikon/actions/workflows/ci.yml)
-[![Coverage Status](https://coveralls.io/repos/github/thanos/kathikon/badge.svg?branch=main)](https://coveralls.io/github/thanos/kathikon?branch=main)
+[![CI](https://github.com/AnimaLogica/kathikon/actions/workflows/ci.yml/badge.svg)](https://github.com/AnimaLogica/kathikon/actions/workflows/ci.yml)
+[![Coverage Status](https://coveralls.io/repos/github/AnimaLogica/kathikon/badge.svg?branch=main)](https://coveralls.io/github/AnimaLogica/kathikon?branch=main)
 [![Hex version](https://img.shields.io/hexpm/v/kathikon.svg)](https://hex.pm/packages/kathikon)
 [![Hex Docs](https://img.shields.io/badge/hex-docs-8A33A3.svg)](https://hexdocs.pm/kathikon)
 

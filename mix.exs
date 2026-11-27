@@ -69,7 +69,7 @@ defmodule Kathikon.MixProject do
       files: ~w(lib docs livebooks .formatter.exs mix.exs README.md LICENSE CHANGELOG.md),
       licenses: ["MIT"],
       maintainers: ["Thanos Vassilakis"],
-      links: %{"GitHub" => "https://github.com/thanos/kathikon"}
+      links: %{"GitHub" => "https://github.com/AnimaLogica/kathikon"}
     ]
   end
 
@@ -77,7 +77,7 @@ defmodule Kathikon.MixProject do
     [
       main: "readme",
       source_ref: "v#{@version}",
-      source_url: "https://github.com/thanos/kathikon/blob/main",
+      source_url: "https://github.com/AnimaLogica/kathikon/blob/main",
       extras: extras(),
       assets: %{"docs/screenshots" => "screenshots"},
       groups_for_modules: [
