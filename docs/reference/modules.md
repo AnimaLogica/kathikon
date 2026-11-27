@@ -14,7 +14,7 @@ Main entry point. Enqueue, cancel, and inspect jobs.
 @spec insert(module(), map(), keyword()) :: {:ok, Job.t()} | {:error, term()}
 ```
 
-Enqueues a job. Starts the target queue dispatcher if needed. Emits `[:kathikon, :job, :inserted]` when a new row is written (not when uniqueness coalesces).
+Enqueues a job. Starts the target queue dispatcher if needed. Emits `[:kathikon, :job, :inserted]` when a new row is written. When uniqueness coalesces into an existing job, emits `[:kathikon, :job, :coalesced]` instead.
 
 **Options**
 
@@ -25,7 +25,7 @@ Enqueues a job. Starts the target queue dispatcher if needed. Emits `[:kathikon,
 | `:max_attempts` | `Kathikon.Config.max_attempts()` | Retry limit |
 | `:schedule_in` | — | Seconds until available |
 | `:schedule_at` | — | `DateTime` when job becomes available |
-| `:unique` | worker default | `[period:, keys: [:args]]`, `[period:, by: fun]` or `false` |
+| `:unique` | worker default | `[period: pos_integer() | :infinity, criteria: fun]` (all keys optional except `:period`), or `false` |
 
 **Examples**
 
@@ -230,7 +230,7 @@ Behaviour for job workers. Optional `unique:` on `use` sets the default for `Kat
 
 ```elixir
 defmodule MyApp.Workers.Webhook do
-  use Kathikon.Worker, unique: [period: 60, keys: [:args]]
+  use Kathikon.Worker, unique: [period: 60, criteria: fn job -> job.args end]
 
   @impl true
   def perform(%{args: %{"url" => url, "body" => body}}) do

@@ -137,6 +137,93 @@ defmodule Kathikon.InsertManyTest do
     assert id == job.id
   end
 
+  describe "per-job telemetry" do
+    setup do
+      parent = self()
+      ref = make_ref()
+
+      :telemetry.attach(
+        "insert-many-per-job-#{inspect(ref)}",
+        [:kathikon, :job, :inserted],
+        fn _event, _measurements, meta, _ -> send(parent, {ref, meta.job_id}) end,
+        nil
+      )
+
+      on_exit(fn -> :telemetry.detach("insert-many-per-job-#{inspect(ref)}") end)
+
+      {:ok, ref: ref}
+    end
+
+    test "telemetry: :per_job emits one inserted event per written job, not per coalesced spec",
+         %{ref: ref} do
+      dup = {Kathikon.Workers.SuccessWorker, %{"n" => 1}, [unique: [period: 60]]}
+      specs = [dup, {Kathikon.Workers.SuccessWorker, %{"n" => 2}}, dup]
+
+      assert {:ok, %{inserted: 3, coalesced: 1, ids: [a, b, a_again]}} =
+               Kathikon.insert_many(specs, telemetry: :per_job)
+
+      assert a == a_again
+      assert_receive {^ref, ^a}
+      assert_receive {^ref, ^b}
+      refute_receive {^ref, _}, 50
+    end
+
+    test "without telemetry: :per_job, no per-job inserted events are emitted", %{ref: ref} do
+      specs = [
+        {Kathikon.Workers.SuccessWorker, %{"n" => 1}},
+        {Kathikon.Workers.SuccessWorker, %{"n" => 2}}
+      ]
+
+      assert {:ok, %{inserted: 2}} = Kathikon.insert_many(specs)
+      refute_receive {^ref, _}, 50
+    end
+  end
+
+  describe "map specs" do
+    test "accepts maps with worker, args, queue and unique options" do
+      specs = [
+        %{worker: Kathikon.Workers.SuccessWorker, args: %{"n" => 1}, queue: :emails},
+        %{worker: Kathikon.Workers.SuccessWorker},
+        %{worker: Kathikon.Workers.SuccessWorker, args: %{"n" => 3}, unique: [period: 60]}
+      ]
+
+      assert {:ok, %{inserted: 3, coalesced: 0, errors: []}} = Kathikon.insert_many(specs)
+
+      jobs = Storage.all()
+      assert Enum.any?(jobs, &(&1.queue == :emails and &1.args == %{"n" => 1}))
+      assert Enum.any?(jobs, &(&1.args == %{}))
+      assert Enum.any?(jobs, &(&1.args == %{"n" => 3}))
+    end
+
+    test "a map spec's unique option coalesces duplicates" do
+      spec = %{worker: Kathikon.Workers.SuccessWorker, args: %{"n" => 4}, unique: [period: 60]}
+
+      assert {:ok, %{inserted: 2, coalesced: 1, ids: [a, a]}} =
+               Kathikon.insert_many([spec, spec])
+
+      assert length(Storage.all()) == 1
+      assert {:ok, %{id: ^a}} = Storage.fetch(a)
+    end
+  end
+
+  describe "chunk_size validation" do
+    test "insert_many rejects a non-positive or non-integer chunk_size" do
+      for bad <- [0, -1, "10"] do
+        assert {:error, {:invalid_chunk_size, ^bad}} =
+                 Kathikon.insert_many([{Kathikon.Workers.SuccessWorker, %{}}], chunk_size: bad)
+      end
+
+      assert Storage.all() == []
+    end
+
+    test "Storage.insert_jobs rejects an invalid chunk_size" do
+      job = Job.build(Kathikon.Workers.SuccessWorker, %{}, [])
+
+      assert {:error, {:invalid_chunk_size, 0}} = Storage.insert_jobs([job], chunk_size: 0)
+      assert {:error, :not_found} = Storage.fetch(job.id)
+    end
+  end
+
   defp ensure_started_calls(acc) do
     receive do
       {:ensured, queue} -> ensure_started_calls([queue | acc])

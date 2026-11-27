@@ -20,8 +20,6 @@ defmodule Kathikon.Storage.Mnesia do
 
   @dialyzer {:no_return, abort: 1}
 
-  @terminal_states [:completed, :failed, :dead, :cancelled, :discarded]
-
   @tables [
     :kathikon_jobs,
     :kathikon_history,
@@ -1234,7 +1232,6 @@ defmodule Kathikon.Storage.Mnesia do
   defp commit_job_with_history!(job, job_id, event, from_state, to_state, metadata) do
     _ = write_job(job)
     _ = write_history_event(job_id, event, from_state, to_state, metadata)
-    _ = maybe_clear_unique(job)
     job
   end
 
@@ -1287,15 +1284,12 @@ defmodule Kathikon.Storage.Mnesia do
     job
   end
 
-  defp maybe_clear_unique(%Job{state: state, id: id}) when state in @terminal_states do
-    clear_unique_for_job_id(id)
-  end
-
-  defp maybe_clear_unique(job), do: job
-
+  # Index rows outlive terminal transitions: `:completed` jobs must keep
+  # blocking duplicates for the period. They are removed only when the job is
+  # deleted (`delete/1`, which the pruner calls).
   defp clear_unique_for_job_id(job_id) do
-    {@unique, :_, job_id}
-    |> :mnesia.match_object()
+    @unique
+    |> :mnesia.index_read(job_id, :job_id)
     |> Enum.each(fn row -> _ = :mnesia.delete_object(row) end)
 
     :ok
@@ -1567,7 +1561,7 @@ defmodule Kathikon.Storage.Mnesia do
     create_bag_table(@unique, [:fingerprint, :job_id])
 
     case :mnesia.wait_for_tables(@tables, 5_000) do
-      :ok -> :ok
+      :ok -> ensure_unique_job_id_index()
       {:timeout, tables} -> raise "timed out waiting for mnesia tables: #{inspect(tables)}"
       {:error, reason} -> raise "mnesia table error: #{inspect(reason)}"
     end
@@ -1579,8 +1573,18 @@ defmodule Kathikon.Storage.Mnesia do
   end
 
   defp create_bag_table(table, attributes) do
-    opts = [attributes: attributes, type: :bag] ++ storage_opts()
+    opts = [attributes: attributes, type: :bag, index: [:job_id]] ++ storage_opts()
     ensure_table(table, opts)
+  end
+
+  # Tables created before the job_id index existed need it added in place.
+  # A table created with the index already present returns `already_exists`.
+  defp ensure_unique_job_id_index do
+    case :mnesia.add_table_index(@unique, :job_id) do
+      {:atomic, :ok} -> :ok
+      {:aborted, {:already_exists, _table, _attr}} -> :ok
+      {:aborted, reason} -> raise "failed to index mnesia table #{@unique}: #{inspect(reason)}"
+    end
   end
 
   defp ensure_table(table, opts) do

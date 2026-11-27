@@ -21,13 +21,16 @@ defmodule Kathikon do
   (`Kathikon.LiveDashboard.Page`).
   """
 
+  require Logger
+
   alias Kathikon.{Job, Queue, QueueControl, Storage, Telemetry, Unique}
 
   @doc """
   Inserts a job into the durable queue.
 
   Starts the target queue dispatcher if needed. Emits `[:kathikon, :job, :inserted]`
-  when a new row is written (not when uniqueness coalesces to an existing job).
+  when a new row is written. When uniqueness coalesces to an existing job, emits
+  `[:kathikon, :job, :coalesced]` instead.
 
   ## Options
 
@@ -36,12 +39,20 @@ defmodule Kathikon do
     * `:max_attempts` — retry limit (default from config)
     * `:schedule_in` — seconds until the job becomes available
     * `:schedule_at` — `DateTime` or `NaiveDateTime` when the job becomes available
-    * `:unique` — uniqueness opts (`[period:, keys: [:args]]`) or `false` to disable.
+    * `:unique` — uniqueness opts (`[period: ..., criteria: fun]`) or `false` to disable.
       Defaults to the worker's `use Kathikon.Worker, unique: ...` when set.
-      Use `by:` instead of `keys:` to hash whatever a function of the built
-      `%Kathikon.Job{}` returns. The function runs once, before storage. If it
-      raises, `insert/3` returns `{:error, {:unique_key_failed, reason}}`.
+      `:period` is a positive integer of seconds or `:infinity`. `:criteria` is a
+      function of the built `%Kathikon.Job{}` (or a `{module, function}` pair)
+      whose return value is hashed; it defaults to `{queue, args}`. The worker
+      module is always part of the hash. The function runs once, before storage.
+      If it raises, `insert/3` returns `{:error, {:unique_key_failed, reason}}`.
+      `:timestamp` is `:inserted_at` (default) or `:scheduled_at`, the anchor
+      for the period. `:states` defaults to `:successful`: in-flight and
+      completed jobs block a duplicate; failed, dead, cancelled and discarded
+      jobs do not.
       On conflict, returns `{:ok, existing_job}` unless `on_conflict: :error`.
+      Check `existing_job.state` if it matters: a completed job means no new
+      work will run.
 
   ## Examples
 
@@ -58,13 +69,13 @@ defmodule Kathikon do
 
       {:ok, job} =
         Kathikon.insert(MyApp.MediaWorker, %{"media_id" => 1},
-          unique: [period: 60, keys: [:args]]
+          unique: [period: 60, criteria: fn job -> job.args end]
         )
 
       # Unique on media_id only; other args are ignored
       {:ok, job} =
         Kathikon.insert(MyApp.MediaWorker, %{"media_id" => 1, "requested_at" => now},
-          unique: [period: 60, by: fn job -> job.args["media_id"] end]
+          unique: [period: 60, criteria: fn job -> job.args["media_id"] end]
         )
   """
   @spec insert(module(), map(), keyword()) :: {:ok, Job.t()} | {:error, term()}
@@ -75,18 +86,36 @@ defmodule Kathikon do
          job = Job.build(worker, args, opts),
          {:ok, prepared} <- Unique.prepare(job, unique),
          :ok <- Queue.ensure_started(job.queue),
-         {:ok, stored} <- storage_insert(job, prepared) do
-      maybe_emit_inserted(job, stored, worker)
+         {:ok, stored} <- Storage.insert_prepared(job, prepared) do
+      report_insert(job, stored, worker)
       {:ok, stored}
     end
   end
 
-  defp storage_insert(job, false), do: Storage.insert(job)
-  defp storage_insert(job, unique), do: Storage.insert_unique(job, unique)
-
-  defp maybe_emit_inserted(built, stored, worker) do
+  # A stored id that differs from the built job means the insert coalesced
+  # into an existing job: no row was written, so no `:inserted` event.
+  defp report_insert(built, stored, worker) do
     if stored.id == built.id do
       Telemetry.event([:job, :inserted], %{}, metadata(stored, worker: worker))
+    else
+      report_coalesced(built, stored, worker)
+    end
+
+    :ok
+  end
+
+  defp report_coalesced(built, existing, worker) do
+    Telemetry.event(
+      [:job, :coalesced],
+      %{count: 1},
+      Map.merge(metadata(existing, worker: worker), %{submitted_queue: built.queue})
+    )
+
+    if existing.state == :completed do
+      Logger.warning(
+        "[kathikon] insert of #{inspect(worker)} coalesced into completed job " <>
+          "#{existing.id}; no new work will be queued for this insert"
+      )
     end
 
     :ok
@@ -99,6 +128,9 @@ defmodule Kathikon do
   `:args`, and the same options as `insert/3` (`:queue`, `:priority`, `:id`, …).
 
   Returns partial success. `errors` are `{index, reason}` into the input.
+  `inserted` counts returned ids, which includes specs that coalesced into an
+  existing job; `coalesced` counts just those, so `inserted - coalesced` is the
+  number of new jobs.
   `:on_error` is `:continue` (default) or `:abort` (roll back the current chunk
   and stop). `:history` defaults to `false` (no `:inserted` row). Pass
   `history: true` to record one. `:telemetry` defaults to one
@@ -121,6 +153,7 @@ defmodule Kathikon do
           {:ok,
            %{
              inserted: non_neg_integer(),
+             coalesced: non_neg_integer(),
              ids: [String.t()],
              errors: [{non_neg_integer(), term()}]
            }}

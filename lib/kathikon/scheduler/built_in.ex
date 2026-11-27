@@ -16,7 +16,7 @@ defmodule Kathikon.Scheduler.BuiltIn do
   @behaviour Kathikon.Scheduler.Behaviour
 
   alias Kathikon.Cron.Expression
-  alias Kathikon.{Job, Storage, Telemetry}
+  alias Kathikon.{Job, Storage, Telemetry, Unique}
 
   @impl true
   def schedule_once(worker, args, opts) when is_atom(worker) do
@@ -32,10 +32,14 @@ defmodule Kathikon.Scheduler.BuiltIn do
           opts
       end
 
-    with {:ok, schedule_opts} <- Kathikon.Timezone.normalize_opts(schedule_opts),
+    unique = Unique.resolve(worker, schedule_opts)
+
+    with {:ok, schedule_opts} <-
+           Kathikon.Timezone.normalize_opts(Keyword.delete(schedule_opts, :unique)),
          job = Job.build(worker, args, schedule_opts),
+         {:ok, prepared} <- Unique.prepare(job, unique),
          :ok <- Kathikon.Queue.ensure_started(job.queue),
-         {:ok, inserted} <- Storage.insert(job) do
+         {:ok, inserted} <- Storage.insert_prepared(job, prepared) do
       Telemetry.event([:scheduler, :fired], %{count: 1}, %{
         worker: worker,
         job_id: inserted.id,

@@ -3,22 +3,30 @@ defmodule Kathikon.Unique do
 
   alias Kathikon.Job
 
-  @default_states [
+  # Oban's `:successful` intent: in-flight jobs and completed jobs block a
+  # duplicate. Jobs that gave up (`:failed`, `:dead`) and jobs that were
+  # cancelled or discarded do not, so a retry can replace them.
+  @successful_states [
     :scheduled,
     :available,
     :claimed,
     :running,
     :retryable,
-    :waiting_for_children
+    :waiting_for_children,
+    :completed
   ]
 
-  @type by :: (Job.t() -> term()) | {module(), atom()}
+  @removed_options [:keys, :by]
+
+  @type criteria :: (Job.t() -> term()) | {module(), atom()}
+  @type timestamp :: :inserted_at | :scheduled_at
+  @type period :: pos_integer() | :infinity
 
   @typedoc "Resolved uniqueness options, before the fingerprint is computed."
   @type t :: %{
-          period: pos_integer(),
-          keys: [atom()] | nil,
-          by: by() | nil,
+          period: period(),
+          criteria: criteria(),
+          timestamp: timestamp(),
           states: [atom()],
           on_conflict: :coalesce | :error
         }
@@ -26,7 +34,8 @@ defmodule Kathikon.Unique do
   @typedoc "What storage receives: no user code, just the precomputed fingerprint."
   @type prepared :: %{
           fingerprint: String.t(),
-          period: pos_integer(),
+          period: period(),
+          timestamp: timestamp(),
           states: [atom()],
           on_conflict: :coalesce | :error
         }
@@ -60,24 +69,41 @@ defmodule Kathikon.Unique do
   @doc false
   @spec normalize!(keyword()) :: t()
   def normalize!(opts) when is_list(opts) do
+    reject_removed_options!(opts)
+
     period = Keyword.fetch!(opts, :period)
-    states = Keyword.get(opts, :states, @default_states)
+    timestamp = Keyword.get(opts, :timestamp, :inserted_at)
+    states = normalize_states!(Keyword.get(opts, :states, :successful))
+    criteria = Keyword.get(opts, :criteria, {__MODULE__, :default_criteria})
     on_conflict = Keyword.get(opts, :on_conflict, :coalesce)
-    {keys, by} = key_source!(opts)
 
     validate_period!(period)
-    validate_states!(states)
+    validate_timestamp!(timestamp)
+    validate_criteria!(criteria)
     validate_on_conflict!(on_conflict)
 
-    %{period: period, keys: keys, by: by, states: states, on_conflict: on_conflict}
+    %{
+      period: period,
+      criteria: criteria,
+      timestamp: timestamp,
+      states: states,
+      on_conflict: on_conflict
+    }
   end
+
+  @doc """
+  Default criteria when `unique:` omits `:criteria`: the queue and the args.
+  The worker module is always hashed on top of this.
+  """
+  @spec default_criteria(Job.t()) :: {atom(), map()}
+  def default_criteria(%Job{queue: queue, args: args}), do: {queue, args}
 
   @doc """
   Computes the fingerprint for `job` and returns the map storage needs.
 
-  Runs any user `:by` function here, in the caller, so it never executes inside
-  a storage transaction. Exceptions, throws and exits from that function become
-  `{:error, {:unique_key_failed, reason}}`.
+  Runs any user `:criteria` function here, in the caller, so it never executes
+  inside a storage transaction. Exceptions, throws and exits from that function
+  become `{:error, {:unique_key_failed, reason}}`.
   """
   @spec prepare(Job.t(), false | t()) ::
           {:ok, false | prepared()} | {:error, {:unique_key_failed, term()}}
@@ -90,6 +116,7 @@ defmodule Kathikon.Unique do
          %{
            fingerprint: hash({job.worker, term}),
            period: unique.period,
+           timestamp: unique.timestamp,
            states: unique.states,
            on_conflict: unique.on_conflict
          }}
@@ -102,87 +129,72 @@ defmodule Kathikon.Unique do
   @doc false
   @spec conflict?(Job.t(), prepared(), DateTime.t()) :: boolean()
   def conflict?(%Job{} = job, unique, now) do
-    job.state in unique.states and within_period?(job.inserted_at, unique.period, now)
+    job.state in unique.states and
+      within_period?(anchor(job, unique.timestamp), unique.period, now)
   end
 
-  defp term_for(job, %{by: nil, keys: keys}) do
-    {:ok, Enum.reduce(keys, %{}, &put_key(&1, &2, job))}
-  end
-
-  defp term_for(job, %{by: by}) do
-    {:ok, call_by(by, job)}
+  defp term_for(job, %{criteria: criteria}) do
+    {:ok, call_criteria(criteria, job)}
   rescue
     exception -> {:error, exception}
   catch
     kind, value -> {:error, {kind, value}}
   end
 
-  defp call_by(fun, job) when is_function(fun, 1), do: fun.(job)
-  defp call_by({module, function}, job), do: apply(module, function, [job])
+  defp call_criteria({module, function}, job), do: apply(module, function, [job])
+  defp call_criteria(fun, job) when is_function(fun, 1), do: fun.(job)
 
   defp hash(term) do
     :crypto.hash(:sha256, :erlang.term_to_binary(term, [:deterministic]))
     |> Base.encode16(case: :lower)
   end
 
-  defp put_key(:args, acc, job), do: Map.put(acc, :args, job.args)
-  defp put_key(:queue, acc, job), do: Map.put(acc, :queue, job.queue)
-  defp put_key(:worker, acc, job), do: Map.put(acc, :worker, job.worker)
-
-  defp put_key(other, _acc, _job) do
-    raise ArgumentError, "unsupported unique key: #{inspect(other)}"
-  end
+  defp anchor(%Job{} = job, :inserted_at), do: job.inserted_at
+  defp anchor(%Job{scheduled_at: nil} = job, :scheduled_at), do: job.inserted_at
+  defp anchor(%Job{scheduled_at: at}, :scheduled_at), do: at
 
   defp within_period?(nil, _period, _now), do: false
+  defp within_period?(_at, :infinity, _now), do: true
+  defp within_period?(at, period, now), do: DateTime.diff(now, at, :second) < period
 
-  defp within_period?(inserted_at, period, now) do
-    DateTime.diff(now, inserted_at, :second) < period
+  defp reject_removed_options!(opts) do
+    Enum.each(@removed_options, fn key ->
+      if Keyword.has_key?(opts, key) do
+        raise ArgumentError, "unique :#{key} was removed; use criteria: instead"
+      end
+    end)
   end
 
-  defp key_source!(opts) do
-    has_keys? = Keyword.has_key?(opts, :keys)
-    has_by? = Keyword.has_key?(opts, :by)
+  defp normalize_states!(:successful), do: @successful_states
+  defp normalize_states!(states) when is_list(states) and states != [], do: states
 
-    cond do
-      has_keys? and has_by? ->
-        raise ArgumentError, "unique :keys and :by cannot be used together"
-
-      has_by? ->
-        {nil, validate_by!(Keyword.fetch!(opts, :by))}
-
-      true ->
-        keys = Keyword.get(opts, :keys, [:args])
-        validate_keys!(keys)
-        {keys, nil}
-    end
-  end
-
-  defp validate_by!(fun) when is_function(fun, 1), do: fun
-
-  defp validate_by!({module, function} = by) when is_atom(module) and is_atom(function), do: by
-
-  defp validate_by!(other) do
+  defp normalize_states!(other) do
     raise ArgumentError,
-          "unique :by must be a function of arity 1 or a {module, function} pair, " <>
+          "unique :states must be :successful or a non-empty list, got: #{inspect(other)}"
+  end
+
+  defp validate_criteria!(fun) when is_function(fun, 1), do: :ok
+  defp validate_criteria!({module, function}) when is_atom(module) and is_atom(function), do: :ok
+
+  defp validate_criteria!(other) do
+    raise ArgumentError,
+          "unique :criteria must be a function of arity 1 or a {module, function} pair, " <>
             "got: #{inspect(other)}"
   end
 
+  defp validate_period!(:infinity), do: :ok
   defp validate_period!(period) when is_integer(period) and period > 0, do: :ok
 
   defp validate_period!(other) do
-    raise ArgumentError, "unique :period must be a positive integer, got: #{inspect(other)}"
+    raise ArgumentError,
+          "unique :period must be a positive integer or :infinity, got: #{inspect(other)}"
   end
 
-  defp validate_keys!(keys) when is_list(keys) and keys != [], do: :ok
+  defp validate_timestamp!(ts) when ts in [:inserted_at, :scheduled_at], do: :ok
 
-  defp validate_keys!(other) do
-    raise ArgumentError, "unique :keys must be a non-empty list, got: #{inspect(other)}"
-  end
-
-  defp validate_states!(states) when is_list(states) and states != [], do: :ok
-
-  defp validate_states!(other) do
-    raise ArgumentError, "unique :states must be a non-empty list, got: #{inspect(other)}"
+  defp validate_timestamp!(other) do
+    raise ArgumentError,
+          "unique :timestamp must be :inserted_at or :scheduled_at, got: #{inspect(other)}"
   end
 
   defp validate_on_conflict!(:coalesce), do: :ok

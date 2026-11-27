@@ -12,6 +12,7 @@ All events start with `[:kathikon, ...]`.
 |-------|------|--------------|----------|
 | `[:kathikon, :job, :inserted]` | Job enqueued | `%{}` | `queue`, `job_id`, `worker`, `state` |
 | `[:kathikon, :job, :inserted_many]` | One `insert_many/2` chunk committed | `%{count: n}` | `%{}` |
+| `[:kathikon, :job, :coalesced]` | An insert matched an existing unique job (no row written) | `%{count: 1}` | `job_id` (existing), `state` (existing), `worker`, `queue`, `submitted_queue` |
 | `[:kathikon, :job, :claimed]` | Job claimed | `%{}` | `queue`, `job_id`, `worker`, `attempt` |
 | `[:kathikon, :job, :started]` | `perform/1` begins | `%{}` | `queue`, `job_id`, `worker`, `attempt` |
 | `[:kathikon, :job, :completed]` | Success | `%{duration: μs}` | `queue`, `job_id`, `worker`, `attempt` |

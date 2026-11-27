@@ -162,12 +162,17 @@ defmodule Kathikon.Storage do
   @doc false
   def insert(job), do: backend_module().insert(job)
 
+  @doc false
+  @spec insert_prepared(Job.t(), false | map()) :: {:ok, Job.t()} | {:error, term()}
+  def insert_prepared(job, false), do: insert(job)
+  def insert_prepared(job, unique) when is_map(unique), do: insert_unique(job, unique)
+
   @doc """
   Inserts a job with uniqueness checks, or returns an existing conflict.
 
-  `unique` is a map with a precomputed `:fingerprint` plus `:period`, `:states`
-  and `:on_conflict`. Backends never run user code or look at the worker; the
-  fingerprint is already computed by the caller.
+  `unique` is a map with a precomputed `:fingerprint` plus `:period`, `:timestamp`,
+  `:states` and `:on_conflict`. Backends never run user code or look at the worker;
+  the fingerprint is already computed by the caller.
 
   Backends may implement the optional `insert_unique/2` callback. When omitted,
   falls back to `insert/1` (no uniqueness).

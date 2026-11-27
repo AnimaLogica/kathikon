@@ -34,6 +34,7 @@ defmodule Kathikon.Telemetry do
     events =
       for suffix <- [
             [:job, :inserted],
+            [:job, :coalesced],
             [:job, :insert],
             [:job, :claimed],
             [:job, :started],
