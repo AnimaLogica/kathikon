@@ -86,4 +86,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.2.0] - 2026-06-23
 
-First feature release after Phase 1. Storage behaviour, formal job state machine, cron scheduling, timezone support, batches, reporting, management APIs, and expanded test coverage. See the [v0.2.0 release on GitHub](https://github.com/thanos/kathikon/releases/tag/v0.2.0).
+First feature release after Phase 1. Storage behaviour, formal job state machine, cron scheduling, timezone support, batches, reporting, management APIs, and expanded test coverage. See the [v0.2.0 release on GitHub](https://github.com/AnimaLogica/kathikon/releases/tag/v0.2.0).
