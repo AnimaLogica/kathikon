@@ -13,6 +13,12 @@ Kathikon uses **Mnesia** as its coordination store and **OTP** as its execution 
 
 ## Status
 
+**v0.5.0 - Job uniqueness**
+
+- `use Kathikon.Worker, unique: [period:, criteria: fun]` and `insert/3` `:unique` opts
+- Duplicate enqueues coalesce to the existing in-flight or completed job; `criteria:` picks what counts as a duplicate, and `[:kathikon, :job, :coalesced]` reports each coalesce
+- Mnesia `:kathikon_unique` fingerprint index
+
 **v0.4.0 - Bulk job submission**
 
 - `Kathikon.insert_many/2` — chunked enqueue of independent jobs
@@ -49,12 +55,12 @@ Previous: **v0.1.0 - Phase 1: Durable Job Queue**
 ```elixir
 def deps do
   [
-    {:kathikon, "~> 0.4.0"}
+    {:kathikon, "~> 0.5.0"}
   ]
 end
 ```
 
-The [Quick start](docs/guides/quick-start.md) guide covers configuration, a worker, and the first job (v0.4.0). A short version:
+The [Quick start](docs/guides/quick-start.md) guide covers configuration, a worker, and the first job (v0.5.0). A short version:
 
 Define a worker:
 
@@ -136,7 +142,7 @@ scheduled → available → claimed → running → completed
 
 Kathikon emits standard telemetry events. See [Telemetry guide](docs/guides/telemetry-and-observability.md) for the full list. Highlights:
 
-- Job: `[:kathikon, :job, :inserted]`, `:claimed`, `:started`, `:completed`, `:failed`, `:sleep`, `:retry`, `:discard`, `:cancel`, `:dead`, `:prune`
+- Job: `[:kathikon, :job, :inserted]`, `:coalesced`, `:claimed`, `:started`, `:completed`, `:failed`, `:sleep`, `:retry`, `:discard`, `:cancel`, `:dead`, `:prune`
 - Runtime: `[:kathikon, :scheduler, :tick]`, `[:kathikon, :scheduler, :fired]`, `[:kathikon, :pruner, :tick]`, `[:kathikon, :dispatcher, :poll]`
 
 Attach the default logger in development:
@@ -198,12 +204,10 @@ See [Management API](docs/management_api.md) and `Kathikon.Dashboard` docs.
 | v0.2.1 | Operations tooling: Dashboard facade, CLI, and RPC (done) |
 | v0.3.0 | LiveDashboard page for a Phoenix app (done) |
 | v0.4.0 | Bulk job submission (chunked insert) |
-| v0.5.0 | Workflows and DAGs (large fan-out uses `Batch.append/2` on `insert_jobs/2`) |
+| v0.5.0 | Job uniqueness (`criteria:` functions, Oban-style default states) |
 | v0.6.0 | Ecto storage backend (PostgreSQL) |
-| v0.7.0 | MongoDB storage backend |
-| v0.8.0 | SQS backend, for jobs that should leave the BEAM |
-| v0.9.0 | Distributed coordination: leases, lifeline, worker ownership |
-| v1.0.0 | Uniqueness, dynamic queues, rate limits, and a stable public API plus a full operator LiveView |
+| v0.7.0 | Distributed coordination: leases, lifeline, worker ownership |
+| later | Workflows/DAGs, MongoDB, SQS, dynamic queues, rate limits, stable API |
 
 ## Documentation
 

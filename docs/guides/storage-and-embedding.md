@@ -94,6 +94,7 @@ The behaviour is `Kathikon.Storage`. v0.4.0 still ships one implementation (`Kat
 | `:kathikon_history` | Durable lifecycle events |
 | `:kathikon_batches` | Batch coordination records |
 | `:kathikon_schedules` | Built-in cron schedule registrations |
+| `:kathikon_unique` | Uniqueness fingerprint → job id (bag) |
 
 Queue configuration lives in `config :kathikon, queues:` (`Kathikon.Config`), not in Mnesia.
 

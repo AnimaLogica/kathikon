@@ -39,3 +39,4 @@ For cross-node clusters, keep args small and prefer IDs referencing external dat
 | `:kathikon_history` | Durable lifecycle events |
 | `:kathikon_batches` | Batch coordination |
 | `:kathikon_schedules` | Built-in recurring registrations |
+| `:kathikon_unique` | Uniqueness fingerprint → job id (bag) |

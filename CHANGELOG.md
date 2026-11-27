@@ -5,6 +5,25 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-11-25
+
+### Added
+
+- Job uniqueness: `use Kathikon.Worker, unique: [period:, criteria: fun]` and `Kathikon.insert/3` / `insert_many/2` `:unique` opts.
+- `criteria:` is a function of the built `%Kathikon.Job{}` (or a `{module, function}` pair) whose return value is hashed with the worker module. It defaults to `{queue, args}`. The function runs once before storage; a failure returns `{:error, {:unique_key_failed, reason}}`.
+- `:states` defaults to `:successful`: in-flight and completed jobs block a duplicate, while failed, dead, cancelled and discarded jobs do not. `:timestamp` (`:inserted_at` or `:scheduled_at`) anchors the period, and `period: :infinity` never expires.
+- A coalesced insert emits `[:kathikon, :job, :coalesced]`, and logs a warning when the existing job is already `:completed`. `insert_many/2` returns a `coalesced:` count.
+- On conflict, returns `{:ok, existing_job}` by default (`on_conflict: :coalesce`); `on_conflict: :error` returns `{:error, :unique}`.
+- Optional storage callback `Kathikon.Storage.insert_unique/2`. Mnesia keeps a `:kathikon_unique` fingerprint bag and clears entries when jobs reach a terminal state.
+
+### Changed
+
+- Roadmap: uniqueness is v0.5.0. Ecto remains v0.6.0. Leases and lifeline move to v0.7.0. Workflows/DAGs, MongoDB, SQS, dynamic queues, rate limits, and the stable API follow later.
+
+### Documentation
+
+- Workers guide covers uniqueness. Dependency examples and the documentation index target v0.5.0.
+
 ## [0.4.0] - 2026-10-09
 
 ### Added

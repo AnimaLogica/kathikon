@@ -28,7 +28,7 @@ The result is partial success:
 
 Enqueue does not write an `:inserted` history row. The job record already has `inserted_at` and its state. Pass `history: true` to record that audit event. Later transitions such as claim and completion still write history. A backend that falls back to `insert/1` still writes the `:inserted` row, because that is what single insert does.
 
-`[:kathikon, :job, :inserted_many]` fires once per chunk with `%{count: n}`. Per-job `[:kathikon, :job, :inserted]` events are off unless you pass `telemetry: :per_job`.
+`inserted` counts returned ids, and `coalesced` counts the ones that matched an existing unique job, so `inserted - coalesced` is the number of new jobs. `[:kathikon, :job, :inserted_many]` fires once per chunk with `%{count: n}`. Per-job `[:kathikon, :job, :inserted]` events are off unless you pass `telemetry: :per_job`.
 
 ## Map, then reduce
 

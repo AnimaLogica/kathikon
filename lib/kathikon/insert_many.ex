@@ -1,12 +1,13 @@
 defmodule Kathikon.InsertMany do
   @moduledoc false
 
-  alias Kathikon.{Config, Job, Queue, Storage, Telemetry}
+  alias Kathikon.{Config, Job, Queue, Storage, Telemetry, Unique}
 
   @spec run(Enumerable.t(), keyword()) ::
           {:ok,
            %{
              inserted: non_neg_integer(),
+             coalesced: non_neg_integer(),
              ids: [String.t()],
              errors: [{non_neg_integer(), term()}]
            }}
@@ -18,46 +19,88 @@ defmodule Kathikon.InsertMany do
   end
 
   defp write_specs(specs, chunk_size, opts) do
-    per_job? = Keyword.get(opts, :telemetry) == :per_job
-    storage_opts = Keyword.take(opts, [:chunk_size, :history, :on_error])
+    ctx = %{
+      per_job?: Keyword.get(opts, :telemetry) == :per_job,
+      on_error: Keyword.get(opts, :on_error, :continue),
+      storage_opts: Keyword.take(opts, [:chunk_size, :history, :on_error])
+    }
 
     specs
     |> Stream.with_index()
     |> Stream.map(fn {spec, index} -> {index, build_spec(spec)} end)
     |> Stream.chunk_every(chunk_size)
-    |> Enum.reduce_while({[], [], MapSet.new()}, fn chunk, acc ->
-      reduce_chunk(chunk, acc, storage_opts, per_job?)
+    |> Enum.reduce_while({[], [], MapSet.new(), 0}, fn chunk, acc ->
+      reduce_chunk(chunk, acc, ctx)
     end)
     |> summarize()
   end
 
-  defp reduce_chunk(chunk, {ids, errors, queues}, storage_opts, per_job?) do
-    {:ok, queues} = ensure_queues(chunk, queues)
-    write_chunk(chunk, storage_opts, per_job?, ids, errors, queues)
+  defp reduce_chunk(chunk, {ids, errors, queues, coalesced}, ctx) do
+    {ready, failed} = split_chunk(chunk)
+
+    if failed != [] and ctx.on_error == :abort do
+      {_index, reason} = hd(failed)
+      {:halt, {:error, reason}}
+    else
+      write_ready(ready, {ids, errors ++ failed, queues, coalesced}, ctx)
+    end
   end
 
-  defp write_chunk(chunk, storage_opts, per_job?, ids, errors, queues) do
-    jobs = Enum.map(chunk, fn {_index, job} -> job end)
+  defp write_ready([], acc, _ctx), do: {:cont, acc}
+
+  defp write_ready(ready, {ids, errors, queues, coalesced}, ctx) do
+    {:ok, queues} = ensure_queues(ready, queues)
+    write_chunk(ready, ctx, ids, errors, queues, coalesced)
+  end
+
+  defp split_chunk(chunk) do
+    {ready, failed} =
+      Enum.reduce(chunk, {[], []}, fn
+        {index, {:ok, job, unique}}, {ready, failed} ->
+          {[{index, {job, unique}} | ready], failed}
+
+        {index, {:error, reason}}, {ready, failed} ->
+          {ready, [{index, reason} | failed]}
+      end)
+
+    {Enum.reverse(ready), Enum.reverse(failed)}
+  end
+
+  defp write_chunk(ready, ctx, ids, errors, queues, coalesced) do
+    jobs = Enum.map(ready, fn {_index, {job, _unique}} -> job end)
+    uniques = Enum.map(ready, fn {_index, {_job, unique}} -> unique end)
+    storage_opts = Keyword.put(ctx.storage_opts, :unique_opts, uniques)
 
     case Storage.insert_jobs(jobs, storage_opts) do
       {:ok, %{ids: chunk_ids, errors: chunk_errors}} ->
-        shifted = shift_errors(chunk, chunk_errors)
-        emit_chunk(jobs, chunk_ids, per_job?)
-        {:cont, {ids ++ chunk_ids, errors ++ shifted, queues}}
+        shifted = shift_errors(ready, chunk_errors)
+        emit_chunk(jobs, chunk_ids, ctx.per_job?)
+        chunk_coalesced = count_coalesced(jobs, chunk_ids)
+        {:cont, {ids ++ chunk_ids, errors ++ shifted, queues, coalesced + chunk_coalesced}}
 
       {:error, reason} ->
         {:halt, {:error, reason}}
     end
   end
 
-  defp summarize({:error, reason}), do: {:error, reason}
-
-  defp summarize({ids, errors, _queues}) do
-    {:ok, %{inserted: length(ids), ids: ids, errors: errors}}
+  # Every returned id is one spec's result. A spec whose job was written returns
+  # that job's id; a spec that coalesced returns an id already claimed by a
+  # written job (earlier in this chunk, or in storage). So the coalesced count
+  # is the returned ids minus the jobs actually written.
+  defp count_coalesced(jobs, chunk_ids) do
+    returned = MapSet.new(chunk_ids)
+    written = Enum.count(jobs, &MapSet.member?(returned, &1.id))
+    length(chunk_ids) - written
   end
 
-  defp ensure_queues(chunk, queues) do
-    Enum.reduce_while(chunk, {:ok, queues}, fn {_index, job}, {:ok, queues} ->
+  defp summarize({:error, reason}), do: {:error, reason}
+
+  defp summarize({ids, errors, _queues, coalesced}) do
+    {:ok, %{inserted: length(ids), coalesced: coalesced, ids: ids, errors: errors}}
+  end
+
+  defp ensure_queues(ready, queues) do
+    Enum.reduce_while(ready, {:ok, queues}, fn {_index, {job, _unique}}, {:ok, queues} ->
       ensure_queue(job.queue, queues)
     end)
   end
@@ -97,8 +140,8 @@ defmodule Kathikon.InsertMany do
     })
   end
 
-  defp shift_errors(chunk, errors) do
-    indexes = Enum.map(chunk, fn {index, _job} -> index end)
+  defp shift_errors(ready, errors) do
+    indexes = Enum.map(ready, fn {index, _pair} -> index end)
 
     Enum.map(errors, fn {local_index, reason} ->
       {Enum.at(indexes, local_index), reason}
@@ -106,17 +149,27 @@ defmodule Kathikon.InsertMany do
   end
 
   defp build_spec({worker, args}) when is_atom(worker) and is_map(args) do
-    Job.build(worker, args, [])
+    build_entry(worker, args, [])
   end
 
   defp build_spec({worker, args, opts}) when is_atom(worker) and is_map(args) and is_list(opts) do
-    Job.build(worker, args, opts)
+    build_entry(worker, args, opts)
   end
 
   defp build_spec(%{worker: worker} = spec) when is_atom(worker) do
     args = Map.get(spec, :args, %{})
     opts = spec |> Map.drop([:worker, :args]) |> Map.to_list()
-    Job.build(worker, args, opts)
+    build_entry(worker, args, opts)
+  end
+
+  defp build_entry(worker, args, opts) do
+    unique = Unique.resolve(worker, opts)
+    job = Job.build(worker, args, Keyword.delete(opts, :unique))
+
+    case Unique.prepare(job, unique) do
+      {:ok, prepared} -> {:ok, job, prepared}
+      {:error, reason} -> {:error, reason}
+    end
   end
 
   defp chunk_size(opts) do

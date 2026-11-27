@@ -75,11 +75,14 @@ defmodule Kathikon.Storage do
               {:ok, %{ids: [String.t()], errors: [{non_neg_integer(), term()}]}}
               | {:error, term()}
 
+  @callback insert_unique(Job.t(), map()) :: {:ok, Job.t()} | {:error, term()}
+
   @optional_callbacks [
     start_job: 3,
     claim_and_start_available_jobs: 3,
     defer_job: 3,
     insert: 1,
+    insert_unique: 2,
     update: 1,
     fetch: 1,
     claim: 2,
@@ -158,6 +161,33 @@ defmodule Kathikon.Storage do
 
   @doc false
   def insert(job), do: backend_module().insert(job)
+
+  @doc false
+  @spec insert_prepared(Job.t(), false | map()) :: {:ok, Job.t()} | {:error, term()}
+  def insert_prepared(job, false), do: insert(job)
+  def insert_prepared(job, unique) when is_map(unique), do: insert_unique(job, unique)
+
+  @doc """
+  Inserts a job with uniqueness checks, or returns an existing conflict.
+
+  `unique` is a map with a precomputed `:fingerprint` plus `:period`, `:timestamp`,
+  `:states` and `:on_conflict`. Backends never run user code or look at the worker;
+  the fingerprint is already computed by the caller.
+
+  Backends may implement the optional `insert_unique/2` callback. When omitted,
+  falls back to `insert/1` (no uniqueness).
+  """
+  @spec insert_unique(Job.t(), map()) :: {:ok, Job.t()} | {:error, term()}
+  def insert_unique(job, unique) when is_map(unique) do
+    mod = backend_module()
+    _ = Code.ensure_loaded(mod)
+
+    if function_exported?(mod, :insert_unique, 2) do
+      mod.insert_unique(job, unique)
+    else
+      insert(job)
+    end
+  end
 
   @doc """
   Inserts many jobs through the storage backend.

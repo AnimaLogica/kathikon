@@ -8,22 +8,30 @@ defmodule Kathikon.Storage.Mnesia do
     * `:kathikon_history` — durable lifecycle events
     * `:kathikon_batches` — batch coordination records
     * `:kathikon_schedules` — built-in scheduler registrations
+    * `:kathikon_unique` — uniqueness fingerprint → job id (bag)
 
   All state transitions use Mnesia transactions.
   """
 
   @behaviour Kathikon.Storage
 
-  alias Kathikon.{History, Job, Job.StateMachine}
+  alias Kathikon.{History, Job, Job.StateMachine, Unique}
   alias Kathikon.Storage.Mnesia.Context
 
   @dialyzer {:no_return, abort: 1}
 
-  @tables [:kathikon_jobs, :kathikon_history, :kathikon_batches, :kathikon_schedules]
+  @tables [
+    :kathikon_jobs,
+    :kathikon_history,
+    :kathikon_batches,
+    :kathikon_schedules,
+    :kathikon_unique
+  ]
   @jobs :kathikon_jobs
   @history :kathikon_history
   @batches :kathikon_batches
   @schedules :kathikon_schedules
+  @unique :kathikon_unique
 
   @impl true
   def setup do
@@ -34,7 +42,7 @@ defmodule Kathikon.Storage.Mnesia do
 
   @impl true
   def clear_jobs! do
-    Enum.each([@jobs, @history, @batches, @schedules], fn table ->
+    Enum.each(@tables, fn table ->
       if table_exists?(table), do: _ = :mnesia.clear_table(table)
     end)
 
@@ -62,6 +70,20 @@ defmodule Kathikon.Storage.Mnesia do
       {:ok, id} -> fetch(id)
       other -> other
     end
+  end
+
+  @impl true
+  def insert_unique(%Job{} = job, unique) when is_map(unique) do
+    transaction(fn ->
+      case find_unique_conflict(unique) do
+        {:conflict, existing} ->
+          resolve_unique_conflict(existing, unique)
+
+        :none ->
+          write_unique_job!(job, unique)
+      end
+    end)
+    |> normalize_transaction()
   end
 
   @impl true
@@ -604,6 +626,7 @@ defmodule Kathikon.Storage.Mnesia do
   def delete(id) do
     _ =
       transaction(fn ->
+        _ = clear_unique_for_job_id(id)
         _ = :mnesia.delete({@jobs, id})
         _ = delete_history_for_job(id)
       end)
@@ -956,13 +979,15 @@ defmodule Kathikon.Storage.Mnesia do
 
   defp insert_jobs_chunk(chunk, offset, history, on_error, opts) do
     batch_id = Keyword.get(opts, :batch_id)
+    unique_opts = Keyword.get(opts, :unique_opts)
 
     transaction(fn ->
       {ids, errors} =
         chunk
         |> Enum.with_index()
         |> Enum.reduce({[], []}, fn {job, index}, acc ->
-          place_chunk_job(job, index, offset, history, on_error, acc)
+          unique = chunk_unique(index, unique_opts)
+          place_chunk_job(job, unique, index, offset, history, on_error, acc)
         end)
 
       ids = Enum.reverse(ids)
@@ -972,10 +997,62 @@ defmodule Kathikon.Storage.Mnesia do
     |> normalize_transaction()
   end
 
-  defp place_chunk_job(job, index, offset, history, on_error, {ids, errors}) do
+  defp chunk_unique(index, unique_opts) when is_list(unique_opts) do
+    case Enum.at(unique_opts, index) do
+      %{fingerprint: _} = unique -> unique
+      _ -> false
+    end
+  end
+
+  defp chunk_unique(_index, _unique_opts), do: false
+
+  defp place_chunk_job(job, false, index, offset, history, on_error, acc) do
+    place_plain_chunk_job(job, index, offset, history, on_error, acc)
+  end
+
+  defp place_chunk_job(job, unique, index, offset, history, on_error, {ids, errors}) do
+    case find_unique_conflict(unique) do
+      {:conflict, existing} ->
+        place_unique_conflict(existing, unique, index, offset, on_error, {ids, errors})
+
+      :none ->
+        place_plain_chunk_job(job, index, offset, history, on_error, {ids, errors}, unique)
+    end
+  end
+
+  defp place_unique_conflict(
+         existing,
+         %{on_conflict: :coalesce},
+         _index,
+         _offset,
+         _on_error,
+         {ids, errors}
+       ) do
+    {[existing.id | ids], errors}
+  end
+
+  defp place_unique_conflict(
+         _existing,
+         %{on_conflict: :error},
+         index,
+         offset,
+         on_error,
+         {ids, errors}
+       ) do
+    if on_error == :abort do
+      abort(:unique)
+    else
+      {ids, [{offset + index, :unique} | errors]}
+    end
+  end
+
+  defp place_plain_chunk_job(job, index, offset, history, on_error, acc, unique \\ false)
+
+  defp place_plain_chunk_job(job, index, offset, history, on_error, {ids, errors}, unique) do
     case read_job(job.id) do
       nil ->
         _ = persist_new_job!(job, history)
+        _ = if unique, do: write_unique_index(job, unique)
         {[job.id | ids], errors}
 
       _existing when on_error == :abort ->
@@ -1156,6 +1233,66 @@ defmodule Kathikon.Storage.Mnesia do
     _ = write_job(job)
     _ = write_history_event(job_id, event, from_state, to_state, metadata)
     job
+  end
+
+  defp write_unique_job!(job, unique) do
+    case read_job(job.id) do
+      nil ->
+        job = Job.normalize(job)
+
+        _ =
+          commit_job_with_history!(
+            job,
+            job.id,
+            :inserted,
+            nil,
+            job.state,
+            %{queue: job.queue}
+          )
+
+        _ = write_unique_index(job, unique)
+        job
+
+      _ ->
+        abort({:already_exists, job.id})
+    end
+  end
+
+  defp find_unique_conflict(unique) do
+    now = DateTime.utc_now()
+
+    :mnesia.read({@unique, unique.fingerprint})
+    |> Enum.find_value(:none, &conflict_from_unique_row(&1, unique, now))
+  end
+
+  defp conflict_from_unique_row({@unique, fp, job_id}, unique, now) do
+    case read_job(job_id) do
+      nil ->
+        _ = :mnesia.delete_object({@unique, fp, job_id})
+        false
+
+      existing ->
+        if Unique.conflict?(existing, unique, now), do: {:conflict, existing}, else: false
+    end
+  end
+
+  defp resolve_unique_conflict(existing, %{on_conflict: :coalesce}), do: existing
+  defp resolve_unique_conflict(_existing, %{on_conflict: :error}), do: abort(:unique)
+
+  defp write_unique_index(job, unique) do
+    :mnesia.write({@unique, unique.fingerprint, job.id})
+    job
+  end
+
+  # Index rows outlive terminal transitions: `:completed` jobs must keep
+  # blocking duplicates for the period. They are removed only when the job is
+  # deleted (`delete/1`, which the pruner calls).
+  defp clear_unique_for_job_id(job_id) do
+    @unique
+    |> :mnesia.index_read(job_id, :job_id)
+    |> Enum.each(fn row -> _ = :mnesia.delete_object(row) end)
+
+    :ok
   end
 
   defp write_history_event(job_id, event, from_state, to_state, metadata) do
@@ -1421,9 +1558,10 @@ defmodule Kathikon.Storage.Mnesia do
     create_table(@history, [:id, :job_id, :payload])
     create_table(@batches, [:batch_id, :payload])
     create_table(@schedules, [:id, :payload])
+    create_bag_table(@unique, [:fingerprint, :job_id])
 
     case :mnesia.wait_for_tables(@tables, 5_000) do
-      :ok -> :ok
+      :ok -> ensure_unique_job_id_index()
       {:timeout, tables} -> raise "timed out waiting for mnesia tables: #{inspect(tables)}"
       {:error, reason} -> raise "mnesia table error: #{inspect(reason)}"
     end
@@ -1432,6 +1570,21 @@ defmodule Kathikon.Storage.Mnesia do
   defp create_table(table, attributes) do
     opts = [attributes: attributes, type: :ordered_set] ++ storage_opts()
     ensure_table(table, opts)
+  end
+
+  defp create_bag_table(table, attributes) do
+    opts = [attributes: attributes, type: :bag, index: [:job_id]] ++ storage_opts()
+    ensure_table(table, opts)
+  end
+
+  # Tables created before the job_id index existed need it added in place.
+  # A table created with the index already present returns `already_exists`.
+  defp ensure_unique_job_id_index do
+    case :mnesia.add_table_index(@unique, :job_id) do
+      {:atomic, :ok} -> :ok
+      {:aborted, {:already_exists, _table, _attr}} -> :ok
+      {:aborted, reason} -> raise "failed to index mnesia table #{@unique}: #{inspect(reason)}"
+    end
   end
 
   defp ensure_table(table, opts) do
